@@ -17,7 +17,10 @@
     "lint:sol": "solhint 'contracts/**/*.sol'",
     "test": "$npm_execpath run test:forge && $npm_execpath run test:hardhat",
     "test:forge": "forge test",
-    "test:hardhat": "hardhat test"
+    "test:hardhat": "hardhat test",
+    "worker": "tsx worker/service.ts",
+    "cli": "tsx worker/cli.ts",
+    "test:worker": "vitest run worker/test"
   },
   "resolutions": {
     "ethers": "^5.7.2",
@@ -53,6 +56,7 @@
     "@types/chai": "^4.3.11",
     "@types/mocha": "^10.0.6",
     "@types/node": "~18.18.14",
+    "@types/node-fetch": "^2.6.13",
     "chai": "^4.4.1",
     "concurrently": "~9.1.0",
     "dotenv": "^16.4.1",
@@ -67,7 +71,9 @@
     "solhint": "^4.1.1",
     "solidity-bytes-utils": "^0.8.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.4"
+    "tsx": "^4.22.4",
+    "typescript": "^5.4.4",
+    "vitest": "^4.1.8"
   },
   "engines": {
     "node": ">=18.16.0"
@@ -81,5 +87,8 @@
   "overrides": {
     "ethers": "^5.7.2",
     "hardhat-deploy": "^0.12.1"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
   }
 }
