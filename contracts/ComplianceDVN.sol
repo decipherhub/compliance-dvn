@@ -53,4 +53,13 @@ contract ComplianceDVN is ILayerZeroDVN, Ownable {
     ) external onlyOperator {
         IReceiveUlnE2(receiveUln).verify(packetHeader, payloadHash, confirmations);
     }
+
+    function setOperator(address _operator) external onlyOwner { operator = _operator; emit OperatorSet(_operator); }
+    function setReceiveUln(address _receiveUln) external onlyOwner { receiveUln = _receiveUln; emit ReceiveUlnSet(_receiveUln); }
+    function setFee(uint256 _fee) external onlyOwner { fee = _fee; emit FeeSet(_fee); }
+
+    function withdraw(address payable _to) external onlyOwner {
+        (bool ok, ) = _to.call{ value: address(this).balance }("");
+        require(ok, "withdraw failed");
+    }
 }

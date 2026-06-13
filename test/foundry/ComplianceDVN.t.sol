@@ -60,5 +60,25 @@ contract ComplianceDVNTest is Test {
         assertEq(ret, 0.0001 ether);
     }
 
+    function test_setters_onlyOwner() public {
+        dvn.setOperator(address(0xAAA));
+        assertEq(dvn.operator(), address(0xAAA));
+        dvn.setReceiveUln(address(0xBBB));
+        assertEq(dvn.receiveUln(), address(0xBBB));
+        dvn.setFee(123);
+        assertEq(dvn.fee(), 123);
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert();
+        dvn.setFee(999);
+    }
+
+    function test_withdraw_sendsBalanceToOwner() public {
+        vm.deal(address(dvn), 1 ether);
+        uint256 before = address(this).balance;
+        dvn.withdraw(payable(address(this)));
+        assertEq(address(this).balance, before + 1 ether);
+    }
+
     receive() external payable {}
 }
