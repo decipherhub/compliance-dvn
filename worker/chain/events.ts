@@ -54,3 +54,30 @@ export async function scanPacketSent(
     return parseEncodedPacket(decoded.encodedPayload as string)
   })
 }
+
+export const DVN_EVENT_ABI = [
+  'event JobAssigned(uint32 dstEid, bytes32 payloadHash, uint64 confirmations, address sender)',
+]
+
+/** Pure decode: extract the (lowercased) payloadHash from a JobAssigned log. */
+export function decodeJobAssignedPayloadHash(
+  iface: ethers.utils.Interface,
+  data: string,
+  topics: string[],
+): string {
+  const decoded = iface.decodeEventLog('JobAssigned', data, topics)
+  return (decoded.payloadHash as string).toLowerCase()
+}
+
+/** Scan our ComplianceDVN on the source chain for JobAssigned; return the set of payloadHashes assigned to us. */
+export async function scanJobAssigned(
+  provider: ethers.providers.Provider,
+  dvnAddress: string,
+  fromBlock: number,
+  toBlock: number,
+): Promise<Set<string>> {
+  const iface = new ethers.utils.Interface(DVN_EVENT_ABI)
+  const topic = iface.getEventTopic('JobAssigned')
+  const logs = await provider.getLogs({ address: dvnAddress, topics: [topic], fromBlock, toBlock })
+  return new Set(logs.map((l) => decodeJobAssignedPayloadHash(iface, l.data, l.topics)))
+}

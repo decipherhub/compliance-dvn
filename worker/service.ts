@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { ethers } from 'ethers'
 import { CHAINS, COMPLIANCE_DVN, ChainCfg } from './config'
 import { buildDenylist, makeAssessor, combine } from './assess/assess'
-import { scanPacketSent, ParsedPacket } from './chain/events'
+import { scanPacketSent, scanJobAssigned, ParsedPacket } from './chain/events'
 import { submitVerification } from './chain/verify'
 import { Checkpoint } from './checkpoint'
 
@@ -45,8 +45,22 @@ async function main() {
         if (from === 0) from = Math.max(0, safeHead - 50)
         if (safeHead <= from) continue
 
+        const srcDvn = COMPLIANCE_DVN[srcKey]
+        if (!srcDvn) {
+          console.warn(`[worker] no ComplianceDVN address for ${srcKey}; cannot filter by assignment, skipping`)
+          // Nothing to verify without our DVN address; advance the checkpoint to avoid re-scan storms.
+          cp.setLastBlock(srcKey, safeHead)
+          cp.save()
+          continue
+        }
+
+        // Only act on packets actually assigned to our DVN (JobAssigned on the source chain).
+        const assigned = await scanJobAssigned(provider, srcDvn, from + 1, safeHead)
         const packets = await scanPacketSent(provider, src.endpoint, from + 1, safeHead)
-        for (const p of packets) await handlePacket(p, assess, signers, cp)
+        for (const p of packets) {
+          if (!assigned.has(p.payloadHash.toLowerCase())) continue
+          await handlePacket(p, assess, signers, cp)
+        }
         cp.setLastBlock(srcKey, safeHead)
         cp.save()
       } catch (err) {
