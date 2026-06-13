@@ -41,7 +41,8 @@ contract ComplianceDVN is ILayerZeroDVN, Ownable {
         return fee;
     }
 
-    function assignJob(AssignJobParam calldata, bytes calldata) external payable returns (uint256) {
+    function assignJob(AssignJobParam calldata _param, bytes calldata) external payable returns (uint256) {
+        emit JobAssigned(_param.dstEid, _param.payloadHash, _param.confirmations, _param.sender);
         return fee;
     }
 
