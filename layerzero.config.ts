@@ -1,52 +1,41 @@
 import { EndpointId } from '@layerzerolabs/lz-definitions'
-import { ExecutorOptionType } from '@layerzerolabs/lz-v2-utilities'
-import { TwoWayConfig, generateConnectionsConfig } from '@layerzerolabs/metadata-tools'
-import { OAppEnforcedOption } from '@layerzerolabs/toolbox-hardhat'
 
-import type { OmniPointHardhat } from '@layerzerolabs/toolbox-hardhat'
+const DVN_BASE = process.env.DVN_BASE_SEPOLIA || '0x0000000000000000000000000000000000000000'
+const DVN_OPT = process.env.DVN_OPTIMISM_SEPOLIA || '0x0000000000000000000000000000000000000000'
 
-const baseContract: OmniPointHardhat = {
-    eid: EndpointId.BASESEP_V2_TESTNET,
-    contractName: 'MyOFT', // Use 'MyOFT' for both testnet and production
-}
+const base = { eid: EndpointId.BASESEP_V2_TESTNET, contractName: 'ToyOFT' }
+const opt = { eid: EndpointId.OPTSEP_V2_TESTNET, contractName: 'ToyOFT' }
 
-const optimismContract: OmniPointHardhat = {
-    eid: EndpointId.OPTSEP_V2_TESTNET,
-    contractName: 'MyOFT', // Use 'MyOFT' for both testnet and production
-}
+// One ULN config per chain, referencing THAT chain's ComplianceDVN as the single required DVN.
+const ulnBase = { confirmations: BigInt(5), requiredDVNs: [DVN_BASE], optionalDVNs: [] as string[], optionalDVNThreshold: 0 }
+const ulnOpt = { confirmations: BigInt(5), requiredDVNs: [DVN_OPT], optionalDVNs: [] as string[], optionalDVNThreshold: 0 }
 
-// To connect all the above chains to each other, we need the following pathways:
-// Base <-> Optimism
+const execBase = { maxMessageSize: 10000, executor: '0x8A3D588D9f6AC041476b094f97FF94ec30169d3D' }
+const execOpt = { maxMessageSize: 10000, executor: '0xDc0D68899405673b932F0DB7f8A49191491A5bcB' }
 
-// For this example's simplicity, we will use the same enforced options values for sending to all chains
-// For production, you should ensure `gas` is set to the correct value through profiling the gas usage of calling OFT._lzReceive(...) on the destination chain
-// To learn more, read https://docs.layerzero.network/v2/concepts/applications/oapp-standard#execution-options-and-enforced-settings
-const EVM_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
-    {
-        msgType: 1,
-        optionType: ExecutorOptionType.LZ_RECEIVE,
-        gas: 80000,
-        value: 0,
-    },
-]
-
-// With the config generator, pathways declared are automatically bidirectional
-// i.e. if you declare A,B there's no need to declare B,A
-const pathways: TwoWayConfig[] = [
-    [
-        baseContract, // Chain A contract
-        optimismContract, // Chain B contract
-        [['LayerZero Labs'], []], // [ requiredDVN[], [ optionalDVN[], threshold ] ]
-        [1, 1], // [A to B confirmations, B to A confirmations]
-        [EVM_ENFORCED_OPTIONS, EVM_ENFORCED_OPTIONS], // Chain B enforcedOptions, Chain A enforcedOptions
+export default {
+    contracts: [{ contract: base }, { contract: opt }],
+    connections: [
+        {
+            from: base,
+            to: opt,
+            // send & receive ulnConfig for a pathway both reference the DESTINATION chain's DVN,
+            // since that's the address that signs verification on the receive side.
+            // Pathway base->opt is verified on opt's ReceiveUln, which enforces opt's requiredDVNs (DVN_OPT).
+            // The send side on base must declare the SAME DVN set the destination expects, so both use ulnOpt.
+            config: {
+                sendConfig: { executorConfig: execBase, ulnConfig: ulnOpt },
+                receiveConfig: { ulnConfig: ulnOpt },
+            },
+        },
+        {
+            from: opt,
+            to: base,
+            // Pathway opt->base is verified on base's ReceiveUln (DVN_BASE); both send & receive use ulnBase.
+            config: {
+                sendConfig: { executorConfig: execOpt, ulnConfig: ulnBase },
+                receiveConfig: { ulnConfig: ulnBase },
+            },
+        },
     ],
-]
-
-export default async function () {
-    // Generate the connections config based on the pathways
-    const connections = await generateConnectionsConfig(pathways)
-    return {
-        contracts: [{ contract: baseContract }, { contract: optimismContract }],
-        connections,
-    }
 }
