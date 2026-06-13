@@ -30,6 +30,22 @@ contract ComplianceDVNTest is Test {
         assertEq(fee, 0.0001 ether);
     }
 
+    function test_submitVerification_onlyOperator() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(ComplianceDVN.NotOperator.selector);
+        dvn.submitVerification(hex"01", keccak256("p"), 5);
+    }
+
+    function test_submitVerification_forwardsToReceiveUln() public {
+        MockReceiveUln mock = new MockReceiveUln();
+        ComplianceDVN d = new ComplianceDVN(address(this), operator, address(mock), 0);
+        vm.prank(operator);
+        d.submitVerification(hex"0102", keccak256("p"), 7);
+        assertEq(mock.calls(), 1);
+        assertEq(mock.lastPayloadHash(), keccak256("p"));
+        assertEq(mock.lastConfirmations(), 7);
+    }
+
     function test_assignJob_returnsFee_andEmits() public {
         ILayerZeroDVN.AssignJobParam memory p = ILayerZeroDVN.AssignJobParam({
             dstEid: 40245,
