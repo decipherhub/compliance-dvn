@@ -87,7 +87,9 @@ contract ComplianceDVNTest is Test {
         dvn.withdraw(payable(address(0xDEAD)));
     }
 
-    function test_assignJob_revertsOnInsufficientFee() public {
+    // SendUln302 calls assignJob with msg.value == 0 (it accrues fees internally), so
+    // assignJob MUST succeed without payment — guard against re-introducing a value check.
+    function test_assignJob_succeedsWithZeroValue() public {
         ILayerZeroDVN.AssignJobParam memory p = ILayerZeroDVN.AssignJobParam({
             dstEid: 40245,
             packetHeader: hex"01",
@@ -95,8 +97,8 @@ contract ComplianceDVNTest is Test {
             confirmations: 5,
             sender: address(0x1234)
         });
-        vm.expectRevert("insufficient fee");
-        dvn.assignJob{ value: 0 }(p, "");
+        uint256 ret = dvn.assignJob{ value: 0 }(p, "");
+        assertEq(ret, 0.0001 ether);
     }
 
     receive() external payable {}

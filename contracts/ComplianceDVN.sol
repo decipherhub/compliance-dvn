@@ -44,7 +44,10 @@ contract ComplianceDVN is ILayerZeroDVN, Ownable {
     }
 
     function assignJob(AssignJobParam calldata _param, bytes calldata) external payable returns (uint256) {
-        require(msg.value >= fee, "insufficient fee");
+        // NOTE: SendUln302 calls assignJob WITHOUT forwarding value (msg.value == 0); the
+        // messagelib accrues each worker's fee internally and workers withdraw separately
+        // (see SendUlnBase._assignJobs). So we must NOT require msg.value >= fee here — doing
+        // so reverts every real send. We simply record the job and return our fee quote.
         emit JobAssigned(_param.dstEid, _param.payloadHash, _param.confirmations, _param.sender);
         return fee;
     }
