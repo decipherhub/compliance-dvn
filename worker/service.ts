@@ -3,7 +3,7 @@ import { ethers } from 'ethers'
 import { CHAINS, COMPLIANCE_DVN, ChainCfg } from './config'
 import { buildDenylist, makeAssessor, combine } from './assess/assess'
 import { scanPacketSent, scanJobAssigned, ParsedPacket } from './chain/events'
-import { submitVerification } from './chain/verify'
+import { submitVerification, commitVerification } from './chain/verify'
 import { Checkpoint } from './checkpoint'
 
 const CHECKPOINT_PATH = process.env.CHECKPOINT_PATH || '.context/dvn-checkpoint.json'
@@ -104,6 +104,14 @@ async function handlePacket(
     console.log(`[VERIFY] payloadHash=${p.payloadHash} tx=${txHash}`)
     cp.markProcessed(key)
     cp.save()
+    // Drive commit so the message is delivered: the default LZ executor does not commit
+    // for custom (unregistered) DVNs, so the worker commits, then the executor lzReceives.
+    try {
+      const commitTx = await commitVerification(signers[dstKey], dst.receiveUln, p.header, p.payloadHash)
+      console.log(`[COMMIT] payloadHash=${p.payloadHash} tx=${commitTx}`)
+    } catch (cerr) {
+      console.log(`[worker] commit pending (verified on-chain; executor/next-run may commit):`, (cerr as Error).message)
+    }
   } catch (err) {
     console.error(`[worker] submitVerification failed (will retry):`, (err as Error).message)
   }

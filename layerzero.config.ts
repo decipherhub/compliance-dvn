@@ -16,25 +16,25 @@ const execOpt = { maxMessageSize: 10000, executor: '0xDc0D68899405673b932F0DB7f8
 export default {
     contracts: [{ contract: base }, { contract: opt }],
     connections: [
+        // A connection `from: A, to: B` configures the OApp ON chain A. BOTH its sendConfig
+        // (A->B send) and its receiveConfig (A receiving from B) are applied on A, so BOTH
+        // must reference chain A's own ComplianceDVN. (A DVN address only has code on its own
+        // chain: getFee/assignJob run on the sender, verify runs on the receiver, and for the
+        // OApp on A all of those happen on A.)
         {
             from: base,
             to: opt,
-            // send & receive ulnConfig for a pathway both reference the DESTINATION chain's DVN,
-            // since that's the address that signs verification on the receive side.
-            // Pathway base->opt is verified on opt's ReceiveUln, which enforces opt's requiredDVNs (DVN_OPT).
-            // The send side on base must declare the SAME DVN set the destination expects, so both use ulnOpt.
             config: {
-                sendConfig: { executorConfig: execBase, ulnConfig: ulnOpt },
-                receiveConfig: { ulnConfig: ulnOpt },
+                sendConfig: { executorConfig: execBase, ulnConfig: ulnBase },
+                receiveConfig: { ulnConfig: ulnBase },
             },
         },
         {
             from: opt,
             to: base,
-            // Pathway opt->base is verified on base's ReceiveUln (DVN_BASE); both send & receive use ulnBase.
             config: {
-                sendConfig: { executorConfig: execOpt, ulnConfig: ulnBase },
-                receiveConfig: { ulnConfig: ulnBase },
+                sendConfig: { executorConfig: execOpt, ulnConfig: ulnOpt },
+                receiveConfig: { ulnConfig: ulnOpt },
             },
         },
     ],
