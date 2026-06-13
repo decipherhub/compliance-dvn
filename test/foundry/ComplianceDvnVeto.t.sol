@@ -72,7 +72,6 @@ contract ComplianceDvnVetoTest is TestHelperOz5 {
     ToyOFT private aOFT;
     ToyOFT private bOFT;
 
-    ComplianceDVN private dvnA;
     ComplianceDVN private dvnB;
 
     address private userA = makeAddr("userA");
@@ -89,13 +88,12 @@ contract ComplianceDvnVetoTest is TestHelperOz5 {
         super.setUp();
         setUpEndpoints(2, LibraryType.UltraLightNode);
 
-        // Receive libs per eid, captured from the harness internal setup.
-        address recvUlnA = endpointSetup.receiveLibs[0]; // eid 1
+        // Receive lib for eid B, captured from the harness internal setup.
+        // Gating is receive-side only, so we only need a DVN on B.
         address recvUlnB = endpointSetup.receiveLibs[1]; // eid 2
 
-        // Deploy one ComplianceDVN per endpoint. operator = this test, fee = 0
+        // Deploy the ComplianceDVN for endpoint B. operator = this test, fee = 0
         // (the harness does not forward msg.value to assignJob).
-        dvnA = new ComplianceDVN(address(this), address(this), recvUlnA, 0);
         dvnB = new ComplianceDVN(address(this), address(this), recvUlnB, 0);
 
         // Install ComplianceDVN as the REQUIRED receive-side DVN for the A->B
@@ -228,7 +226,10 @@ contract ComplianceDvnVetoTest is TestHelperOz5 {
         // so commitVerification must revert (LZ_ULN_Verifying) and nothing can be
         // delivered to the endpoint.
         address receiveUln = address(dvnB.receiveUln());
-        vm.expectRevert(); // LZ_ULN_Verifying
+        // Pin the SPECIFIC revert so an incidental failure can't masquerade as a
+        // veto. LZ_ULN_Verifying is declared on ReceiveUlnBase (the receive lib
+        // refuses to commit a packet whose required DVN has not verified).
+        vm.expectRevert(abi.encodeWithSignature("LZ_ULN_Verifying()"));
         IReceiveUlnConfigurable(receiveUln).commitVerification(header, payloadHash);
 
         // Recipient balance stays 0: the veto blocked delivery.
