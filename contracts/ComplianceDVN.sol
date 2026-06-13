@@ -27,6 +27,8 @@ contract ComplianceDVN is ILayerZeroDVN, Ownable {
     }
 
     constructor(address _owner, address _operator, address _receiveUln, uint256 _fee) Ownable(_owner) {
+        require(_operator != address(0), "zero operator");
+        require(_receiveUln != address(0), "zero receiveUln");
         operator = _operator;
         receiveUln = _receiveUln;
         fee = _fee;
@@ -42,6 +44,7 @@ contract ComplianceDVN is ILayerZeroDVN, Ownable {
     }
 
     function assignJob(AssignJobParam calldata _param, bytes calldata) external payable returns (uint256) {
+        require(msg.value >= fee, "insufficient fee");
         emit JobAssigned(_param.dstEid, _param.payloadHash, _param.confirmations, _param.sender);
         return fee;
     }
@@ -54,9 +57,22 @@ contract ComplianceDVN is ILayerZeroDVN, Ownable {
         IReceiveUlnE2(receiveUln).verify(packetHeader, payloadHash, confirmations);
     }
 
-    function setOperator(address _operator) external onlyOwner { operator = _operator; emit OperatorSet(_operator); }
-    function setReceiveUln(address _receiveUln) external onlyOwner { receiveUln = _receiveUln; emit ReceiveUlnSet(_receiveUln); }
-    function setFee(uint256 _fee) external onlyOwner { fee = _fee; emit FeeSet(_fee); }
+    function setOperator(address _operator) external onlyOwner {
+        require(_operator != address(0), "zero operator");
+        operator = _operator;
+        emit OperatorSet(_operator);
+    }
+
+    function setReceiveUln(address _receiveUln) external onlyOwner {
+        require(_receiveUln != address(0), "zero receiveUln");
+        receiveUln = _receiveUln;
+        emit ReceiveUlnSet(_receiveUln);
+    }
+
+    function setFee(uint256 _fee) external onlyOwner {
+        fee = _fee;
+        emit FeeSet(_fee);
+    }
 
     function withdraw(address payable _to) external onlyOwner {
         (bool ok, ) = _to.call{ value: address(this).balance }("");

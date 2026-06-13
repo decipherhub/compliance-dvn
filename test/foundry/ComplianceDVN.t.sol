@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 import { Test } from "forge-std/Test.sol";
 import { ComplianceDVN } from "../../contracts/ComplianceDVN.sol";
 import { ILayerZeroDVN } from "@layerzerolabs/lz-evm-messagelib-v2/contracts/uln/interfaces/ILayerZeroDVN.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract MockReceiveUln {
     bytes public lastHeader;
@@ -69,7 +70,7 @@ contract ComplianceDVNTest is Test {
         assertEq(dvn.fee(), 123);
 
         vm.prank(address(0xDEAD));
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xDEAD)));
         dvn.setFee(999);
     }
 
@@ -78,6 +79,24 @@ contract ComplianceDVNTest is Test {
         uint256 before = address(this).balance;
         dvn.withdraw(payable(address(this)));
         assertEq(address(this).balance, before + 1 ether);
+    }
+
+    function test_withdraw_onlyOwner() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xDEAD)));
+        dvn.withdraw(payable(address(0xDEAD)));
+    }
+
+    function test_assignJob_revertsOnInsufficientFee() public {
+        ILayerZeroDVN.AssignJobParam memory p = ILayerZeroDVN.AssignJobParam({
+            dstEid: 40245,
+            packetHeader: hex"01",
+            payloadHash: keccak256("payload"),
+            confirmations: 5,
+            sender: address(0x1234)
+        });
+        vm.expectRevert("insufficient fee");
+        dvn.assignJob{ value: 0 }(p, "");
     }
 
     receive() external payable {}
