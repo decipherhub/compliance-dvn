@@ -22,6 +22,10 @@ updates:
           ]
     commit-message:
       prefix: chore(deps)
+    # Major bumps are breaking and are upgraded deliberately, not auto-proposed.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Worker service ships its own lockfile + Docker image.
   - package-ecosystem: npm
@@ -31,6 +35,9 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: chore(deps)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # The worker container base image (node:20-bookworm-slim).
   - package-ecosystem: docker
