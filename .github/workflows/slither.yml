@@ -44,7 +44,7 @@ jobs:
           fail-on: none
 
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         # Skip on forked-PR runs, which lack permission to write security events.
         if: always() && steps.slither.outputs.sarif != ''
         with:
