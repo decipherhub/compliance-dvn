@@ -1,6 +1,6 @@
 import { parseEther } from 'ethers/lib/utils'
-import { type DeployFunction } from 'hardhat-deploy/types'
 import { type HardhatRuntimeEnvironment } from 'hardhat/types'
+import { type DeployFunction } from 'hardhat-deploy/types'
 
 const RECEIVE_ULN: Record<number, string> = {
     40245: '0x12523de19dc41c91F7d2093E0CFbB76b17012C8d', // base-sepolia

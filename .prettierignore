@@ -9,3 +9,13 @@ out/
 *.lock
 package-lock.json
 package.json
+
+# Solidity is governed by solhint (no prettier-plugin-solidity is installed,
+# so prettier would mangle .sol files as plain text).
+*.sol
+
+# Generated deployment artifacts (ABIs, solcInputs) — not hand-authored source.
+deployments/
+
+# Standalone Node 20 worker package: formatted via its own toolchain, not the root.
+worker/

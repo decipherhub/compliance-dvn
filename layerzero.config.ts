@@ -7,8 +7,18 @@ const base = { eid: EndpointId.BASESEP_V2_TESTNET, contractName: 'ToyOFT' }
 const opt = { eid: EndpointId.OPTSEP_V2_TESTNET, contractName: 'ToyOFT' }
 
 // One ULN config per chain, referencing THAT chain's ComplianceDVN as the single required DVN.
-const ulnBase = { confirmations: BigInt(5), requiredDVNs: [DVN_BASE], optionalDVNs: [] as string[], optionalDVNThreshold: 0 }
-const ulnOpt = { confirmations: BigInt(5), requiredDVNs: [DVN_OPT], optionalDVNs: [] as string[], optionalDVNThreshold: 0 }
+const ulnBase = {
+    confirmations: BigInt(5),
+    requiredDVNs: [DVN_BASE],
+    optionalDVNs: [] as string[],
+    optionalDVNThreshold: 0,
+}
+const ulnOpt = {
+    confirmations: BigInt(5),
+    requiredDVNs: [DVN_OPT],
+    optionalDVNs: [] as string[],
+    optionalDVNThreshold: 0,
+}
 
 const execBase = { maxMessageSize: 10000, executor: '0x8A3D588D9f6AC041476b094f97FF94ec30169d3D' }
 const execOpt = { maxMessageSize: 10000, executor: '0xDc0D68899405673b932F0DB7f8A49191491A5bcB' }

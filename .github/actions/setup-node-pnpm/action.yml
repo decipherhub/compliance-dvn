@@ -1,0 +1,46 @@
+name: Setup Node + pnpm
+description: >-
+  Installs pnpm and Node.js (with a built-in pnpm-store cache) and runs a
+  frozen-lockfile install in the requested working directory. Used by every
+  JS/TS job so the install logic lives in exactly one place.
+
+inputs:
+  node-version:
+    description: Explicit Node.js version. Takes precedence over node-version-file.
+    required: false
+    default: ""
+  node-version-file:
+    description: Path to a file (e.g. .nvmrc) to read the Node.js version from.
+    required: false
+    default: .nvmrc
+  working-directory:
+    description: Directory whose package.json/pnpm-lock.yaml drives the install.
+    required: false
+    default: .
+  install:
+    description: Whether to run `pnpm install --frozen-lockfile`.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # pnpm must be on PATH before setup-node so its cache resolver can find it.
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        node-version-file: ${{ inputs.node-version == '' && inputs.node-version-file || '' }}
+        cache: pnpm
+        cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
+
+    - name: Install dependencies
+      if: inputs.install == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: pnpm install --frozen-lockfile
