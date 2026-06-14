@@ -82,7 +82,7 @@ jobs:
           fetch-depth: 0 # full history so release notes can diff against the prior tag
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           body: |
