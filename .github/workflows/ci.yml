@@ -22,7 +22,7 @@ jobs:
     name: Lint (eslint, prettier, solhint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-node-pnpm
@@ -42,7 +42,7 @@ jobs:
     name: Contracts (foundry + hardhat)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-node-pnpm
@@ -73,7 +73,7 @@ jobs:
     name: Worker (typecheck, test, docker build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-node-pnpm
@@ -91,10 +91,10 @@ jobs:
 
       # Validate the production image builds (no push — that is the CD job).
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: worker
           push: false

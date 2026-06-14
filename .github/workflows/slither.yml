@@ -22,7 +22,7 @@ jobs:
       contents: read
       security-events: write # upload SARIF to the Security tab
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Slither builds via `forge build`, which needs the remapped deps in node_modules.
       - name: Setup toolchain
@@ -34,7 +34,7 @@ jobs:
           version: stable
 
       - name: Run Slither
-        uses: crytic/slither-action@v0.4.1
+        uses: crytic/slither-action@v0.4.2
         id: slither
         continue-on-error: true # report findings without blocking; triage via the Security tab
         with:
@@ -44,7 +44,7 @@ jobs:
           fail-on: none
 
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         # Skip on forked-PR runs, which lack permission to write security events.
         if: always() && steps.slither.outputs.sarif != ''
         with:
