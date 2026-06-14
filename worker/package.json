@@ -4,6 +4,7 @@
   "private": true,
   "description": "LayerZero Compliance DVN — sanctions-screening verifier worker + operator CLI",
   "license": "MIT",
+  "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20"
   },

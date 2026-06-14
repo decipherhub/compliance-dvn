@@ -3,6 +3,7 @@
   "version": "0.7.11",
   "private": true,
   "license": "MIT",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "clean": "rm -rf artifacts cache out",
     "compile": "concurrently -c auto --names forge,hardhat '$npm_execpath run compile:forge' '$npm_execpath run compile:hardhat'",
