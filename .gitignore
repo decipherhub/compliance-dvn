@@ -25,3 +25,6 @@ pnpm-error.log
 
 # internal process docs (design spec + plan)
 docs/superpowers/
+
+# presentation deck — kept local, not uploaded
+presentation/
