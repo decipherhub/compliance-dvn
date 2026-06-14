@@ -18,7 +18,7 @@
   "dependencies": {
     "commander": "^15.0.0",
     "dotenv": "^17.4.2",
-    "ethers": "^5.7.2",
+    "ethers": "^6.16.0",
     "node-fetch": "^3.3.2",
     "pino": "^10.3.1",
     "prom-client": "^15.1.3",
