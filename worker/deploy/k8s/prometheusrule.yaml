@@ -1,0 +1,60 @@
+# Requires the Prometheus Operator. Alerts on the fail-closed posture and pipeline health.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: compliance-dvn-worker
+  labels:
+    app.kubernetes.io/name: compliance-dvn-worker
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: compliance-dvn-worker
+      rules:
+        - alert: DvnHalted
+          expr: max(dvn_halted) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Compliance DVN is HALTED (fail-closed)"
+            description: "The worker is withholding ALL verification (reason label on dvn_halted). Cross-chain delivery on screened pathways is paused until it recovers."
+        - alert: DvnNotReady
+          expr: max(dvn_ready) < 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Compliance DVN not READY for 10m"
+            description: "Worker has not been in the READY state for 10 minutes (INITIALIZING or HALTED)."
+        - alert: DvnDenylistStale
+          expr: max(dvn_denylist_age_seconds) > 3000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Denylist approaching staleness threshold"
+            description: "Denylist age {{ $value }}s is approaching MAX_DENYLIST_STALENESS_MS (default 3600s); refreshes may be failing."
+        - alert: DvnRefreshFailing
+          expr: increase(dvn_denylist_refresh_total{result="failure"}[15m]) > 2
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Denylist refreshes are failing"
+            description: "More than 2 denylist refresh failures in 15m — upstream sanctions sources may be unreachable."
+        - alert: DvnVerificationFailing
+          expr: increase(dvn_verifications_total{result="failure"}[10m]) > 3
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "submitVerification failures"
+            description: "Repeated on-chain verification failures on {{ $labels.chain }} — check RPC health, signer balance, and gas."
+        - alert: DvnScanErrors
+          expr: increase(dvn_scan_errors_total[10m]) > 5
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Chain scan errors"
+            description: "Repeated scan/RPC errors on {{ $labels.chain }}."

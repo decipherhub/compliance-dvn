@@ -1,0 +1,138 @@
+{
+  "title": "Compliance DVN Worker",
+  "uid": "compliance-dvn-worker",
+  "tags": ["compliance-dvn", "layerzero"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Status",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "NOT READY", "color": "red" }, "1": { "text": "READY", "color": "green" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        }
+      },
+      "targets": [ { "expr": "max(dvn_ready)", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "title": "HALTED (fail-closed)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "no", "color": "green" }, "1": { "text": "HALTED", "color": "red" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        }
+      },
+      "targets": [ { "expr": "max(dvn_halted)", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "title": "Denylist age (s)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 3000 }, { "color": "red", "value": 3600 } ] }
+        }
+      },
+      "targets": [ { "expr": "max(dvn_denylist_age_seconds)", "refId": "A" } ]
+    },
+    {
+      "id": 4,
+      "title": "Denylist size by source",
+      "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [ { "expr": "dvn_denylist_size", "legendFormat": "{{source}}", "refId": "A" } ]
+    },
+    {
+      "id": 5,
+      "title": "Vetoes (sanctioned transfers withheld)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [ { "expr": "sum by (chain, tag) (rate(dvn_vetoes_total[5m]))", "legendFormat": "{{chain}} / {{tag}}", "refId": "A" } ]
+    },
+    {
+      "id": 6,
+      "title": "Verifications & commits (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "sum by (result) (rate(dvn_verifications_total[5m]))", "legendFormat": "verify {{result}}", "refId": "A" },
+        { "expr": "sum by (result) (rate(dvn_commits_total[5m]))", "legendFormat": "commit {{result}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Scan lag (head - checkpoint)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [ { "expr": "dvn_chain_head_block - dvn_checkpoint_block", "legendFormat": "{{chain}}", "refId": "A" } ]
+    },
+    {
+      "id": 8,
+      "title": "Tx send latency p95 (s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (le, chain, op) (rate(dvn_tx_send_seconds_bucket[5m])))", "legendFormat": "{{chain}} {{op}}", "refId": "A" } ]
+    },
+    {
+      "id": 9,
+      "title": "Packets scanned / assigned (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "sum by (chain) (rate(dvn_packets_scanned_total[5m]))", "legendFormat": "scanned {{chain}}", "refId": "A" },
+        { "expr": "sum by (chain) (rate(dvn_packets_assigned_total[5m]))", "legendFormat": "assigned {{chain}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Scan errors & refresh failures (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "sum by (chain) (rate(dvn_scan_errors_total[5m]))", "legendFormat": "scan err {{chain}}", "refId": "A" },
+        { "expr": "sum by (result) (rate(dvn_denylist_refresh_total[15m]))", "legendFormat": "refresh {{result}}", "refId": "B" }
+      ]
+    }
+  ]
+}

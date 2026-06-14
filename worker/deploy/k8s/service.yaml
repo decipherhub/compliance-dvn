@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: compliance-dvn-worker
+  labels:
+    app.kubernetes.io/name: compliance-dvn-worker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: compliance-dvn-worker
+  ports:
+    - name: http-metrics
+      port: 9090
+      targetPort: http-metrics

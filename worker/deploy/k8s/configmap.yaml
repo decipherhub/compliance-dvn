@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compliance-dvn-worker-config
+  labels:
+    app.kubernetes.io/name: compliance-dvn-worker
+data:
+  # Non-secret tuning. Secrets (PRIVATE_KEY, DVN addresses) come from the Secret.
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  HTTP_PORT: "9090"
+  POLL_MS: "15000"
+  DVN_CONFIRMATIONS: "5"
+  SCAN_BACKFILL_BLOCKS: "50"
+  DENYLIST_REFRESH_MS: "1800000"
+  MAX_DENYLIST_STALENESS_MS: "3600000"
+  TX_MAX_RETRIES: "3"
+  TX_GAS_BUMP_PCT: "15"
+  CHECKPOINT_PATH: "/data/dvn-checkpoint.json"
+  CHAINS_ENABLED: "baseSepolia,optimismSepolia"
+  RPC_URL_BASE_SEPOLIA: "https://sepolia.base.org"
+  RPC_URL_OPTIMISM_SEPOLIA: "https://sepolia.optimism.io"

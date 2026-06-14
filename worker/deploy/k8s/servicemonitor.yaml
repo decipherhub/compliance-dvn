@@ -1,0 +1,19 @@
+# Requires the Prometheus Operator (CRD monitoring.coreos.com/v1).
+# If you scrape via annotations instead, drop this and annotate the pod.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: compliance-dvn-worker
+  labels:
+    app.kubernetes.io/name: compliance-dvn-worker
+    # Match your Prometheus `serviceMonitorSelector` (commonly `release: kube-prometheus-stack`).
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: compliance-dvn-worker
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
