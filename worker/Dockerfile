@@ -2,7 +2,7 @@
 # Multi-stage build for the Compliance DVN worker. Build context is this `worker/` dir.
 
 # ── deps: install production dependencies against the frozen lockfile ────────
-FROM node:20-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 # Pin pnpm via npm rather than corepack: this base image's corepack cannot
 # verify newer pnpm signatures (ERR "Cannot find matching keyid"), and the
@@ -14,7 +14,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --prod --frozen-lockfile
 
 # ── runtime: minimal image, non-root, runs TypeScript via tsx ────────────────
-FROM node:20-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     HTTP_PORT=9090 \
     CHECKPOINT_PATH=/data/dvn-checkpoint.json
