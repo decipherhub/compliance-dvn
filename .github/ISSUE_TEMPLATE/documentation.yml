@@ -1,0 +1,50 @@
+name: Documentation improvement
+description: Report missing, unclear, stale, or incorrect documentation.
+title: "docs: <short summary>"
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the Compliance DVN docs. Please search
+        [existing issues](https://github.com/decipherhub/compliance-dvn/issues?q=is%3Aissue)
+        first so related docs work can be grouped.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Documentation area
+      options:
+        - README
+        - Contributing guide
+        - Custom workers guide
+        - Worker runbook
+        - Contract / worker inline docs
+        - Deployment / operator tasks
+        - Issue or pull request templates
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What should change?
+      description: Describe what is missing, unclear, stale, or incorrect.
+    validations:
+      required: true
+  - type: textarea
+    id: suggested
+    attributes:
+      label: Suggested wording or structure
+      description: If you know the fix, propose it here.
+  - type: textarea
+    id: links
+    attributes:
+      label: Relevant links
+      description: README sections, source files, docs, issues, PRs, or external references.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
