@@ -1,7 +1,15 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'fs'
+import { dirname } from 'path'
 
 interface PersistedState { lastBlock: Record<string, number>; processed: string[] }
 
+/**
+ * Crash-safe persistence of scan progress (last block per chain) and processed packet keys.
+ *
+ * Writes are atomic: we write to a sibling `.tmp` file and `rename` it into place. POSIX
+ * rename is atomic, so a crash mid-write leaves the previous good file intact rather than a
+ * truncated, unparseable one.
+ */
 export class Checkpoint {
   private lastBlock: Record<string, number> = {}
   private processedSet = new Set<string>()
@@ -21,6 +29,10 @@ export class Checkpoint {
 
   save(): void {
     const out: PersistedState = { lastBlock: this.lastBlock, processed: [...this.processedSet] }
-    writeFileSync(this.path, JSON.stringify(out, null, 2))
+    const dir = dirname(this.path)
+    if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const tmp = `${this.path}.tmp`
+    writeFileSync(tmp, JSON.stringify(out, null, 2))
+    renameSync(tmp, this.path)
   }
 }

@@ -17,4 +17,13 @@ export class Denylist {
   has(address: string): boolean { return this.map.has(address.toLowerCase()) }
   lookup(address: string): DenyEntry | undefined { return this.map.get(address.toLowerCase()) }
   get size(): number { return this.map.size }
+
+  /** Count of entries carrying each tag (an address may count toward several tags). */
+  tagCounts(): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const e of this.map.values()) {
+      for (const t of e.tags) counts[t] = (counts[t] ?? 0) + 1
+    }
+    return counts
+  }
 }
