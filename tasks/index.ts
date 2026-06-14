@@ -1,4 +1,5 @@
 import './configureDvn'
+import './demo'
 import './demoSend'
 import './sendOFT'
 import './simple-workers-mock/commit'
