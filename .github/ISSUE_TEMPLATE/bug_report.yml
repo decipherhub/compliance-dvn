@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a defect in the contracts, the off-chain worker, or the tooling.
+title: "bug: <short summary>"
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug.
+
+        > [!WARNING]
+        > **Do not use this form for security issues.** If this is a way to bypass
+        > the veto, evade screening, or otherwise weaken compliance enforcement, please
+        > follow our [Security Policy](https://github.com/decipherhub/compliance-dvn/security/policy)
+        > for private disclosure instead.
+
+        Search [existing issues](https://github.com/decipherhub/compliance-dvn/issues?q=is%3Aissue)
+        first — your bug may already be tracked.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the system is misbehaving?
+      options:
+        - Contracts (contracts/ComplianceDVN.sol, on-chain veto)
+        - Worker — service (worker/service.ts, verify/commit/veto loop)
+        - Worker — assess / risk engine (worker/assess/)
+        - Worker — tracker (worker/tracker/)
+        - CLI (pnpm cli assess / trace)
+        - Deploy / wiring (hardhat tasks, layerzero.config.ts)
+        - Build / tooling / CI
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug and its impact.
+      placeholder: A clean transfer was vetoed even though no party is on the denylist.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The worker should VERIFY + COMMIT and the transfer should deliver.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, addresses, chains, and config. Minimal repros get fixed fastest.
+      value: |
+        1. `pnpm install`
+        2. ...
+        3. `pnpm worker`
+        4. `npx hardhat demo:send --network optimism-sepolia --to 0x... --dst base`
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: Worker logs, `forge test` output, tx hashes, or a LayerZero Scan link. This is automatically formatted as code.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill in what's relevant.
+      value: |
+        - OS:
+        - Node (`node -v`):
+        - pnpm (`pnpm -v`):
+        - forge (`forge --version`):
+        - Chains involved (e.g. Base Sepolia 40245 → Optimism Sepolia 40232):
+        - Commit / branch:
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through the Security Policy).
+          required: true

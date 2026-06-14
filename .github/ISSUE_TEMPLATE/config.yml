@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private disclosure)
+    url: https://github.com/decipherhub/compliance-dvn/security/advisories/new
+    about: Report a way to bypass screening, evade the veto, or otherwise weaken compliance enforcement privately. Never open a public issue for this.
+  - name: Question / usage help
+    url: https://github.com/decipherhub/compliance-dvn/discussions
+    about: For how-to questions and open-ended discussion, please use Discussions instead of an issue.
+  - name: LayerZero V2 documentation
+    url: https://docs.layerzero.network/v2
+    about: For questions about DVNs, ULN config, or message verification mechanics.
