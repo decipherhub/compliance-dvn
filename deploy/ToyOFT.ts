@@ -1,5 +1,5 @@
-import { type DeployFunction } from 'hardhat-deploy/types'
 import { type HardhatRuntimeEnvironment } from 'hardhat/types'
+import { type DeployFunction } from 'hardhat-deploy/types'
 
 const deploy: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
     const { deploy } = hre.deployments

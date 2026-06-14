@@ -4,7 +4,11 @@
 # ── deps: install production dependencies against the frozen lockfile ────────
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
-RUN corepack enable
+# Pin pnpm via npm rather than corepack: this base image's corepack cannot
+# verify newer pnpm signatures (ERR "Cannot find matching keyid"), and the
+# latest pnpm requires node:sqlite which Node 20 lacks. Keep in sync with the
+# `packageManager` field in package.json.
+RUN npm install -g pnpm@9.15.9
 COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --prod --frozen-lockfile

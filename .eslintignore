@@ -8,3 +8,10 @@ out
 *.yaml
 *.lock
 package-lock.json
+
+# Generated deployment artifacts (ABIs, solcInputs) — not hand-authored source.
+deployments
+
+# Standalone Node 20 worker package: governed by its own toolchain
+# (worker/tsconfig.json typecheck + vitest), not the root Next.js eslint config.
+worker

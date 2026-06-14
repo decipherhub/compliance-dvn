@@ -1,5 +1,9 @@
 # Compliance DVN
 
+[![CI](https://github.com/decipherhub/compliance-dvn/actions/workflows/ci.yml/badge.svg)](https://github.com/decipherhub/compliance-dvn/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/decipherhub/compliance-dvn/actions/workflows/codeql.yml/badge.svg)](https://github.com/decipherhub/compliance-dvn/actions/workflows/codeql.yml)
+[![Slither](https://github.com/decipherhub/compliance-dvn/actions/workflows/slither.yml/badge.svg)](https://github.com/decipherhub/compliance-dvn/actions/workflows/slither.yml)
+
 A LayerZero V2 Decentralized Verifier Network (DVN) that screens OFT transfers for
 AML/sanctions hits during message verification and blocks non-compliant ones before
 they settle on the destination chain. When this node is configured as a required DVN,
@@ -14,10 +18,10 @@ inside LayerZero's own verification step.
 Two identical OFT transfers, Optimism Sepolia to Base Sepolia, differing only in the
 recipient. The off-chain worker screened each and acted:
 
-| Demo | Recipient | Worker action | LayerZero Scan | Delivered |
-| --- | --- | --- | --- | --- |
-| Clean | `0x…cCCc` (not flagged) | `VERIFY` + `COMMIT` | [`DELIVERED`](https://testnet.layerzeroscan.com/tx/0x5ec2e442e0fef14233ab0d92ca04fd9046328f741f947261814eedfbc001aef1) | Yes, 1 TOY minted on Base |
-| Flagged | `0x…dEaD` (on denylist) | `VETO` (withheld verify) | [`INFLIGHT`](https://testnet.layerzeroscan.com/tx/0xf9038c4f4dd851b56a619f15bc0eea702a97d6924a2fac2e2b6c386edac8f5ae) | No, never committed, balance stays 0 |
+| Demo    | Recipient               | Worker action            | LayerZero Scan                                                                                                         | Delivered                            |
+| ------- | ----------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Clean   | `0x…cCCc` (not flagged) | `VERIFY` + `COMMIT`      | [`DELIVERED`](https://testnet.layerzeroscan.com/tx/0x5ec2e442e0fef14233ab0d92ca04fd9046328f741f947261814eedfbc001aef1) | Yes, 1 TOY minted on Base            |
+| Flagged | `0x…dEaD` (on denylist) | `VETO` (withheld verify) | [`INFLIGHT`](https://testnet.layerzeroscan.com/tx/0xf9038c4f4dd851b56a619f15bc0eea702a97d6924a2fac2e2b6c386edac8f5ae)  | No, never committed, balance stays 0 |
 
 The flagged transfer is stuck at verification. The required DVN never attested, so
 `commitVerification` reverts `LZ_ULN_Verifying` and the executor can never `lzReceive`.
@@ -65,10 +69,10 @@ reconstructs a route via the LayerZero Scan API and colors each endpoint with `a
 
 ## Deployed contracts
 
-| Contract | Base Sepolia (40245) | Optimism Sepolia (40232) |
-| --- | --- | --- |
+| Contract      | Base Sepolia (40245)                         | Optimism Sepolia (40232)                     |
+| ------------- | -------------------------------------------- | -------------------------------------------- |
 | ComplianceDVN | `0x5d5B0c36D1e522C0BB44fdd6402576De42484Ee0` | `0x8bc1f192391018Ee605D7A8D9B761159d91092C3` |
-| ToyOFT | `0xdEc1591D39ECb8278d1a2256a5BF17507A375F00` | `0xdEc1591D39ECb8278d1a2256a5BF17507A375F00` |
+| ToyOFT        | `0xdEc1591D39ECb8278d1a2256a5BF17507A375F00` | `0xdEc1591D39ECb8278d1a2256a5BF17507A375F00` |
 
 The DVN is wired as the single required DVN (`requiredDVNCount = 1`) on both chains
 in both directions, so one withheld attestation is a full block.
@@ -109,6 +113,22 @@ stays 0.
 
 Vitest (16): `assess()`/`combine()`, the 81-byte header and OFT-message decoders, the
 `JobAssigned` assignment filter, the durable checkpoint, and the tracker transform.
+
+## CI / CD
+
+GitHub Actions enforce the same gates locally and on every PR:
+
+| Workflow      | Trigger                       | What it does                                                                                                                                     |
+| ------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ci.yml`      | push to `main`, all PRs       | Lint (`eslint` + `prettier` + `solhint`); contracts (`forge build`/`test`, `hardhat compile`/`test`); worker (typecheck + vitest + Docker build) |
+| `codeql.yml`  | push, PR, weekly              | CodeQL security + quality scan of JS/TS                                                                                                          |
+| `slither.yml` | push, PR                      | Slither static analysis of the contracts; findings to the Security tab                                                                           |
+| `publish.yml` | push to `main`, `v*.*.*` tags | Build + push the worker image to `ghcr.io/<owner>/compliance-dvn-worker` (`:edge` on main, semver + `:latest` on tags) and cut a GitHub Release  |
+
+The contracts jobs run `pnpm install` before any `forge`/`slither` command — `foundry.toml`
+remaps imports into `node_modules`, so the JS deps must be present first. The worker is
+built and tested against its own `package.json` (Node 20) to mirror the shipped image.
+Releasing is a tag: `git tag v1.2.3 && git push --tags`.
 
 ## Design notes and gotchas
 

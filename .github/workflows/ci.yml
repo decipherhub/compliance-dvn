@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Allow manual runs from the Actions tab.
+  workflow_dispatch:
+
+# A new push to a branch/PR cancels the previous still-running CI for it.
+# `github.head_ref` is set on PRs; `github.ref` covers branch pushes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Static analysis of the JS/TS + Solidity sources ──────────────────────
+  lint:
+    name: Lint (eslint, prettier, solhint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-node-pnpm
+
+      # eslint + prettier --check (the repo's own `lint:js` script).
+      - name: Lint JS/TS + formatting
+        run: pnpm run lint:js
+
+      # solhint over contracts/ (the repo's own `lint:sol` script).
+      - name: Lint Solidity
+        run: pnpm run lint:sol
+
+  # ── Solidity: Foundry build/format/tests + Hardhat compile/tests ─────────
+  # Forge needs node_modules present (foundry.toml remaps imports into it),
+  # so JS deps are installed before any forge/hardhat command runs.
+  contracts:
+    name: Contracts (foundry + hardhat)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build (forge)
+        run: forge build --sizes
+
+      - name: Test (forge)
+        run: forge test -vvv
+        env:
+          FOUNDRY_FUZZ_RUNS: 1000
+
+      - name: Compile (hardhat)
+        run: pnpm run compile:hardhat
+
+      - name: Test (hardhat)
+        run: pnpm run test:hardhat
+
+  # ── TypeScript worker: typecheck, unit tests, and container build ────────
+  # Runs against the worker's OWN package.json/lockfile (Node 20) to mirror
+  # exactly what ships in the Docker image.
+  worker:
+    name: Worker (typecheck, test, docker build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: "20"
+          working-directory: worker
+
+      - name: Typecheck
+        working-directory: worker
+        run: pnpm run typecheck
+
+      - name: Unit tests
+        working-directory: worker
+        run: pnpm run test
+
+      # Validate the production image builds (no push — that is the CD job).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: worker
+          push: false
+          load: true
+          tags: compliance-dvn-worker:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

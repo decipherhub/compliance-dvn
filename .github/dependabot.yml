@@ -1,0 +1,49 @@
+version: 2
+updates:
+  # Root toolchain: Hardhat, Foundry devtools, LayerZero SDKs, linters.
+  - package-ecosystem: npm # also drives pnpm (reads pnpm-lock.yaml)
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      layerzero:
+        patterns: ["@layerzerolabs/*"]
+      dev-tooling:
+        patterns:
+          [
+            "eslint*",
+            "prettier*",
+            "solhint*",
+            "@types/*",
+            "typescript",
+            "vitest",
+            "tsx",
+          ]
+    commit-message:
+      prefix: chore(deps)
+
+  # Worker service ships its own lockfile + Docker image.
+  - package-ecosystem: npm
+    directory: "/worker"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+
+  # The worker container base image (node:20-bookworm-slim).
+  - package-ecosystem: docker
+    directory: "/worker"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(docker)
+
+  # Pin and update the GitHub Actions used by the workflows above.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
