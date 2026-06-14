@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Compliance DVN — demo</title>
+<style>
+  :root{--mono:'SF Mono',ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace}
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%;background:#0a0c10;display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
+  .wrap{width:940px}
+  .title{color:#e7edf3;font:800 22px/1 -apple-system,system-ui,sans-serif;letter-spacing:-.01em;margin-bottom:4px}
+  .title b{color:#ff5d6c}
+  .sub{color:#8b97a7;font:500 13px var(--mono);margin-bottom:16px}
+  .term{background:#06080b;border:1px solid #1d2530;border-radius:12px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+  .bar{background:#0e131a;padding:10px 14px;display:flex;gap:7px;align-items:center;border-bottom:1px solid #1d2530}
+  .bar i{width:11px;height:11px;border-radius:50%}
+  .bar .t{margin-left:12px;color:#8b97a7;font-size:12px}
+  .body{padding:18px 20px;height:330px;font-size:14.5px;line-height:1.62;white-space:pre-wrap}
+  .row{opacity:0}
+  .cur{display:inline-block;width:9px;height:16px;background:#36d399;vertical-align:-3px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .foot{margin-top:14px;display:flex;gap:10px;font:600 13px var(--mono)}
+  .chip{padding:6px 12px;border-radius:999px;border:1px solid #1d2530;color:#8b97a7}
+  .chip.ok{color:#36d399;border-color:rgba(54,211,153,.35)}
+  .chip.no{color:#ff5d6c;border-color:rgba(255,93,108,.35)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title">Compliance DVN — same transfer, one <b>vetoed</b></div>
+  <div class="sub">OP → Base · the worker verifies the clean send and withholds the flagged one</div>
+  <div class="term">
+    <div class="bar"><i style="background:#ff5d6c"></i><i style="background:#f5c451"></i><i style="background:#36d399"></i><span class="t">compliance-dvn worker · live testnet</span></div>
+    <div class="body" id="b"></div>
+  </div>
+  <div class="foot">
+    <span class="chip ok">CLEAN → DELIVERED · 1 TOY</span>
+    <span class="chip no">FLAGGED → INFLIGHT · 0 TOY · never settles</span>
+  </div>
+</div>
+<script>
+  const lines=[
+    {t:'$ npx hardhat demo:clean --network optimism-sepolia',c:'#6aa9ff'},
+    {t:'  sent tx 0x5ec2e442…  recipient 0x…cCCc',c:'#8b97a7'},
+    {t:'[VERIFY] payloadHash=0x1f6789… tx=0x1eb2a747…',c:'#36d399'},
+    {t:'[COMMIT] payloadHash=0x1f6789… tx=0x46db314d…',c:'#36d399'},
+    {t:'  → Base: 1 TOY delivered   (Scan: DELIVERED)',c:'#36d399'},
+    {t:' ',c:'#fff'},
+    {t:'$ npx hardhat demo:veto  --network optimism-sepolia',c:'#6aa9ff'},
+    {t:'  sent tx 0xf9038c4f…  recipient 0x…dEaD  [flagged]',c:'#8b97a7'},
+    {t:'[VETO] withholding verify  payloadHash=0x6bcecf4a…',c:'#ff5d6c'},
+    {t:'       reason = Operator test denylist entry',c:'#ff8a94'},
+    {t:'  → Base: 0 TOY.  commit reverts LZ_ULN_Verifying.',c:'#ff5d6c'},
+    {t:'  → message never settles.',c:'#ff5d6c'},
+  ];
+  const b=document.getElementById('b');
+  // Show the first k lines instantly (deterministic; used for live autoplay and frame capture).
+  function showUpTo(k){
+    b.innerHTML='';
+    for(let idx=0;idx<k && idx<lines.length;idx++){
+      const ln=lines[idx];
+      const d=document.createElement('div');d.className='row';d.style.color=ln.c;d.style.opacity='1';d.textContent=ln.t;
+      b.appendChild(d);
+    }
+    const c=document.createElement('span');c.className='cur';b.appendChild(c);
+  }
+  window.__showUpTo = showUpTo;          // capture hook (deterministic, no timers)
+  // Live autoplay: reveal line by line, then hold and loop.
+  let k=0, autoplay=true;
+  function tick(){ if(!autoplay)return; showUpTo(k); k++; if(k>lines.length){ setTimeout(()=>{k=0;tick();},3000); return;} setTimeout(tick,520); }
+  if(!location.search.includes('capture')){ tick(); } else { autoplay=false; showUpTo(lines.length); }
+</script>
+</body>
+</html>
