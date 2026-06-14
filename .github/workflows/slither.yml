@@ -34,7 +34,7 @@ jobs:
           version: stable
 
       - name: Run Slither
-        uses: crytic/slither-action@v0.4.1
+        uses: crytic/slither-action@v0.4.2
         id: slither
         continue-on-error: true # report findings without blocking; triage via the Security tab
         with:
