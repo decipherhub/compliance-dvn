@@ -22,7 +22,7 @@ jobs:
       contents: read
       security-events: write # upload SARIF to the Security tab
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Slither builds via `forge build`, which needs the remapped deps in node_modules.
       - name: Setup toolchain
