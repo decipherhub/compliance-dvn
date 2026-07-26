@@ -61,7 +61,7 @@
     "@types/node": "~18.19.130",
     "@types/node-fetch": "^2.6.13",
     "chai": "^4.4.1",
-    "concurrently": "~10.0.3",
+    "concurrently": "~10.0.4",
     "dotenv": "^16.4.1",
     "eslint": "^8.55.0",
     "eslint-plugin-jest-extended": "~2.4.0",
