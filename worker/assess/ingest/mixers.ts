@@ -1,4 +1,4 @@
-import { Denylist } from '../store'
+import { RiskStore } from '../store'
 
 /** Curated OFAC-sanctioned Tornado Cash contracts (mainnet). */
 export const MIXER_ADDRESSES: string[] = [
@@ -7,7 +7,15 @@ export const MIXER_ADDRESSES: string[] = [
   '0x910cbd523d972eb0a6f4cae4618ad62622b39dbf', // Tornado.Cash 100 ETH
 ].map((a) => a.toLowerCase())
 
-export function ingestMixers(dl: Denylist): number {
-  for (const a of MIXER_ADDRESSES) dl.add(a, 'mixer', 'Curated sanctioned mixer contract (Tornado Cash)')
+/** Sanctioned by OFAC, so the entries carry `ofac` authority rather than operator authority. */
+export function ingestMixers(store: RiskStore): number {
+  for (const a of MIXER_ADDRESSES) {
+    store.upsert({
+      subject: a,
+      subjectType: 'contract',
+      labels: ['sanctioned_mixer'],
+      source: 'ofac',
+    })
+  }
   return MIXER_ADDRESSES.length
 }

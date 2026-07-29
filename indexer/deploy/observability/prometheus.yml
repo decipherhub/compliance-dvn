@@ -1,0 +1,26 @@
+# Scrape config for the local observability stack.
+#
+# Two targets on different sides of the container boundary:
+#   - the indexer runs in this compose project, so it is reachable by service name
+#   - the worker runs on the HOST (pnpm start), so it is reachable via host.docker.internal
+#
+# `host-gateway` is mapped in docker-compose.yml so this also works outside Docker Desktop.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: indexer
+    static_configs:
+      - targets: ['indexer:9091']
+        labels:
+          component: indexer
+
+  - job_name: worker
+    static_configs:
+      # The worker's HTTP_PORT. If you run the worker in a container instead, change this to its
+      # service name — a target that never comes up shows as "down" in Prometheus rather than
+      # failing anything, which is easy to miss.
+      - targets: ['host.docker.internal:9090']
+        labels:
+          component: worker

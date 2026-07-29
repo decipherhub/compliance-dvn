@@ -2,15 +2,17 @@ import { task } from 'hardhat/config'
 
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
-task('demo:send', 'Send ToyOFT from current network to the other testnet')
+import { OAPP_CONTRACT } from '../oapp.contract'
+
+task('demo:send', `Send ${OAPP_CONTRACT} from current network to the other testnet`)
     .addParam('to', 'recipient address on destination')
     .addOptionalParam('dst', 'destination: base|opt', 'base')
     .addOptionalParam('amount', 'human amount', '1')
     .setAction(async (args, hre) => {
         const dstEid = args.dst === 'opt' ? EndpointId.OPTSEP_V2_TESTNET : EndpointId.BASESEP_V2_TESTNET
         const { deployer } = await hre.getNamedAccounts()
-        const d = await hre.deployments.get('ToyOFT')
-        const oft = await hre.ethers.getContractAt('ToyOFT', d.address)
+        const d = await hre.deployments.get(OAPP_CONTRACT)
+        const oft = await hre.ethers.getContractAt(OAPP_CONTRACT, d.address)
 
         const amount = hre.ethers.utils.parseEther(args.amount)
         await (await oft.mint(deployer, amount)).wait()

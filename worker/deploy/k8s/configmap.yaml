@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: compliance-dvn-worker
 data:
-  # Non-secret tuning. Secrets (PRIVATE_KEY, DVN addresses) come from the Secret.
+  # Non-secret tuning. Secrets (OPERATOR_PRIVATE_KEY, DVN addresses) come from the Secret.
   NODE_ENV: "production"
   LOG_LEVEL: "info"
   HTTP_PORT: "9090"

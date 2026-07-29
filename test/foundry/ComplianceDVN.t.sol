@@ -34,17 +34,67 @@ contract ComplianceDVNTest is Test {
     function test_submitVerification_onlyOperator() public {
         vm.prank(address(0xDEAD));
         vm.expectRevert(ComplianceDVN.NotOperator.selector);
-        dvn.submitVerification(hex"01", keccak256("p"), 5);
+        dvn.submitVerification(hex"01", keccak256("p"), 5, 0, 0, 0, bytes32(0));
     }
 
-    function test_submitVerification_forwardsToReceiveUln() public {
+    function test_submitVerification_forwardsToReceiveUln_andEmitsVerdict() public {
         MockReceiveUln mock = new MockReceiveUln();
         ComplianceDVN d = new ComplianceDVN(address(this), operator, address(mock), 0);
+        vm.expectEmit(true, false, false, true);
+        emit ComplianceDVN.RiskVerdict(keccak256("p"), 0, 12, 5, keccak256("ev"));
         vm.prank(operator);
-        d.submitVerification(hex"0102", keccak256("p"), 7);
+        d.submitVerification(hex"0102", keccak256("p"), 7, 0, 12, 5, keccak256("ev"));
         assertEq(mock.calls(), 1);
         assertEq(mock.lastPayloadHash(), keccak256("p"));
         assertEq(mock.lastConfirmations(), 7);
+    }
+
+    /// A packet that was blocked or held cannot also have been verified — the audit trail must
+    /// not be able to contradict itself.
+    function test_submitVerification_rejectsNonAllowAction() public {
+        MockReceiveUln mock = new MockReceiveUln();
+        ComplianceDVN d = new ComplianceDVN(address(this), operator, address(mock), 0);
+        for (uint8 action = 1; action <= 3; action++) {
+            vm.prank(operator);
+            vm.expectRevert(abi.encodeWithSelector(ComplianceDVN.VerificationRequiresAllow.selector, action));
+            d.submitVerification(hex"01", keccak256("p"), 5, action, 0, 0, bytes32(0));
+        }
+        assertEq(mock.calls(), 0, "no verification may have reached the ULN");
+    }
+
+    function test_recordVerdict_emitsForOperator() public {
+        vm.expectEmit(true, false, false, true);
+        emit ComplianceDVN.RiskVerdict(keccak256("p"), 3, 100, 1, keccak256("ev"));
+        vm.prank(operator);
+        dvn.recordVerdict(keccak256("p"), 3, 100, 1, keccak256("ev"));
+    }
+
+    function test_recordVerdict_onlyOperator() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(ComplianceDVN.NotOperator.selector);
+        dvn.recordVerdict(keccak256("p"), 3, 100, 1, bytes32(0));
+    }
+
+    /// An allow rides along on submitVerification, so recording one separately would
+    /// double-report the same outcome.
+    function test_recordVerdict_rejectsAllow() public {
+        vm.prank(operator);
+        vm.expectRevert(ComplianceDVN.AllowNotSeparatelyRecorded.selector);
+        dvn.recordVerdict(keccak256("p"), 0, 0, 0, bytes32(0));
+    }
+
+    function test_recordVerdict_rejectsUnknownAction() public {
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(ComplianceDVN.UnknownAction.selector, uint8(4)));
+        dvn.recordVerdict(keccak256("p"), 4, 0, 0, bytes32(0));
+    }
+
+    /// These codes are part of the event ABI; an indexer decoding old logs depends on them.
+    function test_actionCodes_arePinned() public view {
+        assertEq(dvn.ACTION_ALLOW(), 0);
+        assertEq(dvn.ACTION_DELAY(), 1);
+        assertEq(dvn.ACTION_MANUAL_REVIEW(), 2);
+        assertEq(dvn.ACTION_BLOCK(), 3);
     }
 
     function test_assignJob_returnsFee_andEmits() public {
@@ -59,6 +109,26 @@ contract ComplianceDVNTest is Test {
         emit ComplianceDVN.JobAssigned(40245, keccak256("payload"), 5, address(0x1234));
         uint256 ret = dvn.assignJob{ value: 0.0001 ether }(p, "");
         assertEq(ret, 0.0001 ether);
+    }
+
+    function test_approvePacket_emitsForOwner() public {
+        vm.expectEmit(true, false, false, true);
+        emit ComplianceDVN.PacketApproved(keccak256("p"), address(this));
+        dvn.approvePacket(keccak256("p"));
+    }
+
+    // Approval is a human override of a risk verdict, so the operator key the worker holds
+    // must NOT be able to release the packets that worker chose to withhold.
+    function test_approvePacket_rejectsOperator() public {
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, operator));
+        dvn.approvePacket(keccak256("p"));
+    }
+
+    function test_approvePacket_rejectsStranger() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xDEAD)));
+        dvn.approvePacket(keccak256("p"));
     }
 
     function test_setters_onlyOwner() public {

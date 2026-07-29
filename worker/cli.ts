@@ -2,13 +2,20 @@ import 'dotenv/config'
 import { ethers } from 'ethers'
 import { Command, InvalidArgumentError } from 'commander'
 import { loadConfig, CHAIN_REGISTRY, ResolvedChain } from './runtime/config'
-import { buildDenylist, makeAssessor, combine, Assessment } from './assess/assess'
+import { buildRiskStore, makeAssessor, combine, Assessment } from './assess/assess'
 import { scanPacketSent } from './chain/events'
-import { submitVerification, commitVerification } from './chain/verify'
+import { submitVerification, commitVerification, approvePacket } from './chain/verify'
+import { ethersReader } from './chain/reader'
+import { RpcContractInspector, type ChainReader } from './assess/providers/contract'
+import { RpcTokenInspector } from './assess/providers/token'
+import { encodeVerdict } from './assess/verdict'
 import { trace } from './tracker/trace'
+import { Checkpoint } from './checkpoint'
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/
+/** 0x prefix optional — ethers accepts a bare 64-hex key. */
+const HEX_PRIVATE_KEY = /^(0x)?[0-9a-fA-F]{64}$/
 
 /** Exit codes: 0 success, 1 runtime error, 2 usage/validation error. */
 const EXIT = { OK: 0, RUNTIME: 1, USAGE: 2 } as const
@@ -35,20 +42,22 @@ function emit(json: boolean, data: unknown, human: () => void): void {
 }
 
 function renderAssessment(label: string, a: Assessment): string {
-  const verdict = a.blocked ? 'BLOCKED' : 'clean'
-  const detail = a.blocked ? ` [${a.tags.join(', ')}] ${a.reasons.join('; ')}` : ''
-  return `  ${label}: ${a.address} -> ${verdict}${detail}`
+  const detail = a.reasonCodes.length ? ` [${a.reasonCodes.join(', ')}]` : ''
+  return `  ${label}: ${a.subject} -> ${a.action} (score ${a.score})${detail}`
 }
 
 async function cmdAssess(address: string, opts: { json?: boolean }): Promise<void> {
-  const assess = makeAssessor(await buildDenylist())
-  const result = assess(address)
+  const assess = makeAssessor((await buildRiskStore()).store)
+  const result = await assess(address)
   emit(!!opts.json, result, () => {
-    process.stdout.write(`Assessment for ${result.address}\n`)
-    process.stdout.write(`  verdict: ${result.blocked ? 'BLOCKED' : 'clean'}\n`)
-    if (result.blocked) {
-      process.stdout.write(`  tags:    ${result.tags.join(', ')}\n`)
-      process.stdout.write(`  reasons: ${result.reasons.join('; ')}\n`)
+    process.stdout.write(`Assessment for ${result.subject}\n`)
+    process.stdout.write(`  action: ${result.action}\n`)
+    process.stdout.write(`  score:  ${result.score}\n`)
+    if (result.reasonCodes.length) {
+      process.stdout.write(`  reasons: ${result.reasonCodes.join(', ')}\n`)
+      for (const e of result.evidence) {
+        process.stdout.write(`    ${e.type} (weight ${e.weight}, ${e.source}, confidence ${e.confidence})\n`)
+      }
     }
   })
 }
@@ -83,31 +92,67 @@ async function cmdVerify(
   if (!receipt) throw new CliError(`transaction ${txHash} not found on ${chainKey}`, EXIT.RUNTIME)
 
   const packets = await scanPacketSent(provider, src.endpoint, receipt.blockNumber, receipt.blockNumber)
-  const assess = makeAssessor(await buildDenylist())
+
+  // Screen with the same contract checks the service uses, so a dry run predicts it faithfully.
+  const dstProviders: Record<string, ethers.providers.JsonRpcProvider> = {}
+  const readers: Record<string, ChainReader> = { [src.key]: ethersReader(provider) }
+  for (const c of config.chains) {
+    if (c.key === src.key) continue
+    dstProviders[c.key] = new ethers.providers.JsonRpcProvider(c.rpc)
+    readers[c.key] = ethersReader(dstProviders[c.key])
+  }
+  const assess = makeAssessor((await buildRiskStore()).store, {
+    contracts: new RpcContractInspector({ readers }),
+    tokens: new RpcTokenInspector({ readers }),
+  })
 
   const results: Array<Record<string, unknown>> = []
   for (const p of packets) {
-    const verdict = combine([assess(p.senderAddress), assess(p.receiverAddress), assess(p.oft.toAddress)])
     const dst = byEid.get(p.dstEid)
+    const verdict = combine(
+      await Promise.all([
+        assess(p.senderAddress, src.key),
+        assess(p.receiverAddress, dst?.key),
+        assess(p.oft.toAddress, dst?.key),
+      ]),
+    )
     const row: Record<string, unknown> = {
       payloadHash: p.payloadHash,
       dstEid: p.dstEid,
       dstChain: dst?.key ?? null,
-      blocked: verdict.blocked,
-      tags: verdict.tags,
-      reasons: verdict.reasons,
+      verdict: verdict.action,
+      score: verdict.score,
+      reasonCodes: verdict.reasonCodes,
       action: 'pending',
     }
 
     if (!dst) {
       row.action = 'skipped:unknown-dst'
-    } else if (verdict.blocked) {
+    } else if (verdict.action === 'block') {
       row.action = 'veto'
+    } else if (verdict.action !== 'allow') {
+      // One-shot command: report the hold, leave the deferral bookkeeping to the service.
+      row.action = `withheld:${verdict.action}`
     } else if (opts.dryRun) {
       row.action = 'dry-run:would-verify'
     } else {
-      const signer = new ethers.Wallet(config.privateKey, new ethers.providers.JsonRpcProvider(dst.rpc))
-      const verifyTx = await submitVerification(signer, dst.dvn, p.header, p.payloadHash, config.confirmations)
+      const signer = new ethers.Wallet(config.operatorPrivateKey, new ethers.providers.JsonRpcProvider(dst.rpc))
+      const parties = [
+        { subject: p.senderAddress, chainKey: src.key },
+        { subject: p.receiverAddress, chainKey: dst.key },
+        { subject: p.oft.toAddress, chainKey: dst.key },
+      ]
+      const { encoded, unmapped } = encodeVerdict(p.payloadHash, verdict, parties)
+      if (unmapped.length) row.unmappedReasons = unmapped
+      row.evidenceHash = encoded.evidenceHash
+      const verifyTx = await submitVerification(
+        signer,
+        dst.dvn,
+        p.header,
+        p.payloadHash,
+        config.confirmations,
+        encoded,
+      )
       row.verifyTx = verifyTx
       try {
         row.commitTx = await commitVerification(signer, dst.receiveUln, p.header, p.payloadHash)
@@ -124,10 +169,72 @@ async function cmdVerify(
     process.stdout.write(`Verify ${chainKey} tx ${txHash} — ${results.length} packet(s)\n`)
     for (const r of results) {
       process.stdout.write(`  ${r.payloadHash} -> dst=${r.dstChain ?? r.dstEid} action=${r.action}\n`)
-      if (r.blocked) process.stdout.write(`    VETO [${(r.tags as string[]).join(', ')}] ${(r.reasons as string[]).join('; ')}\n`)
+      if (r.verdict !== 'allow') {
+        process.stdout.write(`    ${r.verdict} score=${r.score} [${(r.reasonCodes as string[]).join(', ')}]\n`)
+      }
       if (r.verifyTx) process.stdout.write(`    verify tx: ${r.verifyTx}\n`)
       if (r.commitTx) process.stdout.write(`    commit tx: ${r.commitTx}\n`)
     }
+  })
+}
+
+async function cmdPending(opts: { json?: boolean }): Promise<void> {
+  const config = loadConfig()
+  const held = new Checkpoint(config.checkpointPath).deferredEntries()
+  const rows = held.map(([key, r]) => ({
+    key,
+    payloadHash: r.payloadHash,
+    dstEid: r.dstEid,
+    srcChain: r.srcChainKey,
+    action: r.action,
+    score: r.score,
+    reasonCodes: r.reasonCodes,
+    attempts: r.attempts,
+    heldSince: new Date(r.firstDeferredAt).toISOString(),
+    retryAfter: r.action === 'delay' ? new Date(r.retryAfter).toISOString() : null,
+  }))
+  emit(!!opts.json, { pending: rows }, () => {
+    if (!rows.length) return void process.stdout.write('No packets held.\n')
+    process.stdout.write(`${rows.length} packet(s) held\n`)
+    for (const r of rows) {
+      process.stdout.write(`  ${r.key}  ${r.action}  score=${r.score}  attempts=${r.attempts}\n`)
+      process.stdout.write(`    src=${r.srcChain} dstEid=${r.dstEid} since=${r.heldSince}\n`)
+      process.stdout.write(`    reasons: ${r.reasonCodes.join(', ') || '(none)'}\n`)
+      if (r.action === 'manual-review') {
+        process.stdout.write(`    approve with: dvn-cli approve <dstChainKey> ${r.payloadHash}\n`)
+      }
+    }
+  })
+}
+
+/**
+ * Approve a held packet on-chain. Signs with OWNER_PRIVATE_KEY, which is CLI-only on purpose:
+ * `approvePacket` is owner-gated so the worker (operator key) cannot release its own holds.
+ * The approval is recorded on the DVN that submits the verification — the destination chain's.
+ */
+async function cmdApprove(chainKey: string, payloadHash: string, opts: { json?: boolean }): Promise<void> {
+  const ownerKey = (process.env.OWNER_PRIVATE_KEY ?? '').trim()
+  if (!HEX_PRIVATE_KEY.test(ownerKey)) {
+    throw new CliError(
+      'OWNER_PRIVATE_KEY is required to approve (64 hex chars, 0x prefix optional). It is intentionally separate from the worker OPERATOR_PRIVATE_KEY.',
+      EXIT.USAGE,
+    )
+  }
+  const config = loadConfig()
+  const dst = config.chains.find((c) => c.key === chainKey)
+  if (!dst) {
+    throw new CliError(
+      `chain '${chainKey}' is not enabled (enabled: ${config.chains.map((c) => c.key).join(', ')})`,
+      EXIT.USAGE,
+    )
+  }
+  const signer = new ethers.Wallet(ownerKey.startsWith('0x') ? ownerKey : `0x${ownerKey}`, new ethers.providers.JsonRpcProvider(dst.rpc))
+  const tx = await approvePacket(signer, dst.dvn, payloadHash)
+  emit(!!opts.json, { chain: chainKey, payloadHash, approver: signer.address, tx }, () => {
+    process.stdout.write(`Approved ${payloadHash} on ${chainKey}\n`)
+    process.stdout.write(`  approver: ${signer.address}\n`)
+    process.stdout.write(`  tx:       ${tx}\n`)
+    process.stdout.write('The worker releases the packet on its next scan of this chain.\n')
   })
 }
 
@@ -169,9 +276,23 @@ function buildProgram(): Command {
     .option('--json', 'emit machine-readable JSON')
     .action(cmdTrace)
 
+  program
+    .command('pending')
+    .description('List packets the worker is holding (delay / manual-review)')
+    .option('--json', 'emit machine-readable JSON')
+    .action(cmdPending)
+
+  program
+    .command('approve')
+    .description('Approve a held packet on-chain (owner key; requires OWNER_PRIVATE_KEY)')
+    .argument('<chainKey>', `destination chain (${Object.keys(CHAIN_REGISTRY).join(' | ')})`, parseChainKey)
+    .argument('<payloadHash>', 'payload hash of the held packet', parseTxHash)
+    .option('--json', 'emit machine-readable JSON')
+    .action(cmdApprove)
+
   program.addHelpText(
     'after',
-    `\nExamples:\n  $ dvn-cli assess 0x0000000000000000000000000000000000000000\n  $ dvn-cli verify baseSepolia 0x<txhash> --dry-run\n  $ dvn-cli trace 0x<txhash> --json\n`,
+    `\nExamples:\n  $ dvn-cli assess 0x0000000000000000000000000000000000000000\n  $ dvn-cli verify baseSepolia 0x<txhash> --dry-run\n  $ dvn-cli trace 0x<txhash> --json\n  $ dvn-cli pending\n  $ dvn-cli approve optimismSepolia 0x<payloadHash>\n`,
   )
 
   // exitOverride is per-command: apply it to the program AND every subcommand so all

@@ -1,4 +1,6 @@
 import './configureDvn'
+import './preflight'
+import './verifyWiring'
 import './demo'
 import './demoSend'
 import './sendOFT'

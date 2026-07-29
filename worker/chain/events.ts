@@ -57,6 +57,7 @@ export async function scanPacketSent(
 
 export const DVN_EVENT_ABI = [
   'event JobAssigned(uint32 dstEid, bytes32 payloadHash, uint64 confirmations, address sender)',
+  'event PacketApproved(bytes32 indexed payloadHash, address approver)',
 ]
 
 /** Pure decode: extract the (lowercased) payloadHash from a JobAssigned log. */
@@ -80,4 +81,26 @@ export async function scanJobAssigned(
   const topic = iface.getEventTopic('JobAssigned')
   const logs = await provider.getLogs({ address: dvnAddress, topics: [topic], fromBlock, toBlock })
   return new Set(logs.map((l) => decodeJobAssignedPayloadHash(iface, l.data, l.topics)))
+}
+
+/**
+ * Scan our ComplianceDVN for owner approvals of held packets.
+ *
+ * `payloadHash` is indexed, so it is read from topics rather than data. Approvals are recorded
+ * on the DVN that will submit the verification — the destination chain's — but the worker
+ * scans every configured chain and matches purely on payloadHash, so it does not need to know
+ * which side an approval arrived on.
+ */
+export async function scanPacketApproved(
+  provider: ethers.providers.Provider,
+  dvnAddress: string,
+  fromBlock: number,
+  toBlock: number,
+): Promise<Set<string>> {
+  const iface = new ethers.utils.Interface(DVN_EVENT_ABI)
+  const topic = iface.getEventTopic('PacketApproved')
+  const logs = await provider.getLogs({ address: dvnAddress, topics: [topic], fromBlock, toBlock })
+  return new Set(
+    logs.map((l) => (iface.decodeEventLog('PacketApproved', l.data, l.topics).payloadHash as string).toLowerCase()),
+  )
 }

@@ -57,7 +57,8 @@ export interface ResolvedChain {
 
 export interface Config {
   readonly nodeEnv: string
-  readonly privateKey: string
+  /** The operator key the worker signs verify/commit/recordVerdict with. */
+  readonly operatorPrivateKey: string
   readonly chains: readonly ResolvedChain[]
   readonly pollMs: number
   readonly confirmations: number
@@ -69,9 +70,29 @@ export interface Config {
   readonly logLevel: string
   readonly checkpointPath: string
   readonly testDenylist: string
+  /** Empty disables indexer feed ingest entirely. */
+  readonly indexerFeedUrl: string
+  readonly indexerSigners: readonly string[]
+  readonly feedMaxSkewSec: number
+  readonly degradedMode: 'degrade' | 'halt'
+  /**
+   * Non-allow actions that get a separate `recordVerdict` transaction. `allow` is never listed:
+   * it rides along on `submitVerification` at no extra cost and is always recorded.
+   */
+  readonly emitVerdictFor: readonly ('delay' | 'manual-review' | 'block')[]
 }
 
-const HEX_PRIVATE_KEY = /^0x[0-9a-fA-F]{64}$/
+/**
+ * A 32-byte private key, with the 0x prefix optional.
+ *
+ * ethers accepts a bare 64-hex key, so requiring the prefix would reject a configuration that
+ * works perfectly well. Values are normalized to the 0x form below so everything downstream sees
+ * one shape.
+ */
+const HEX_PRIVATE_KEY = /^(0x)?[0-9a-fA-F]{64}$/
+
+/** Canonicalize to the 0x form. */
+const withHexPrefix = (v: string) => (v.startsWith('0x') ? v : `0x${v}`)
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const
 
@@ -85,9 +106,18 @@ function intField(def: number, min: number, max = Number.MAX_SAFE_INTEGER) {
 
 const ScalarSchema = z.object({
   NODE_ENV: z.string().optional().default('production'),
-  PRIVATE_KEY: z
-    .string({ error: 'PRIVATE_KEY is required' })
-    .regex(HEX_PRIVATE_KEY, 'PRIVATE_KEY must be a 32-byte hex string (0x + 64 hex chars)'),
+  /**
+   * The OPERATOR key, named explicitly rather than as a bare `PRIVATE_KEY`.
+   *
+   * The repo root's .env has a `PRIVATE_KEY` too, and there it is the OWNER key. Sharing the name
+   * across the two files made one mistake — copying root .env into worker/ — silently hand the
+   * worker the owner key, and with it the ability to approve the very packets it withheld. The
+   * distinct name means that copy fails loudly instead.
+   */
+  OPERATOR_PRIVATE_KEY: z
+    .string({ error: 'OPERATOR_PRIVATE_KEY is required' })
+    .regex(HEX_PRIVATE_KEY, 'OPERATOR_PRIVATE_KEY must be a 32-byte hex key (64 hex chars, 0x prefix optional)')
+    .transform(withHexPrefix),
   POLL_MS: intField(15_000, 1),
   DVN_CONFIRMATIONS: intField(5, 0),
   DENYLIST_REFRESH_MS: intField(1_800_000, 1),
@@ -108,6 +138,30 @@ const ScalarSchema = z.object({
     .string()
     .optional()
     .transform((v) => v ?? ''),
+  SCAM_TOKENS: z
+    .string()
+    .optional()
+    .transform((v) => v ?? ''),
+  INDEXER_FEED_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? '').trim()),
+  INDEXER_SIGNERS: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? '').trim()),
+  FEED_MAX_SKEW_SEC: intField(300, 0, 86_400),
+  DEGRADED_MODE: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? 'degrade' : v))
+    .pipe(z.enum(['degrade', 'halt'])),
+  EMIT_VERDICT_EVENTS: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? 'block' : v.trim()))
+    .transform((v) => (v === '' ? [] : v.split(',').map((s) => s.trim()).filter(Boolean)))
+    .pipe(z.array(z.enum(['delay', 'manual-review', 'block']))),
 })
 
 /** Thrown when the environment fails validation; `.message` lists every problem. */
@@ -131,6 +185,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       const key = issue.path.join('.') || '(root)'
       problems.push(`${key}: ${issue.message}`)
     }
+  }
+
+  // Name the likely cause rather than just the symptom. A bare PRIVATE_KEY with no
+  // OPERATOR_PRIVATE_KEY almost always means the repo root's .env was copied here — and there
+  // PRIVATE_KEY is the OWNER key. Running with it would give the worker approval rights over the
+  // packets it withheld, so this is worth spelling out instead of a generic "required" message.
+  if (!(env.OPERATOR_PRIVATE_KEY ?? '').trim() && (env.PRIVATE_KEY ?? '').trim()) {
+    problems.push(
+      'PRIVATE_KEY is set but OPERATOR_PRIVATE_KEY is not. The worker signs with the OPERATOR key; ' +
+        "the repo root's PRIVATE_KEY is the OWNER key and must never reach this process — it is what " +
+        'approves held packets. Set OPERATOR_PRIVATE_KEY to the worker key and remove PRIVATE_KEY.',
+    )
   }
 
   // Resolve the enabled chain set independently of scalar success so we surface all problems.
@@ -177,12 +243,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     )
   }
 
+  // An unsigned feed is worse than no feed: without an allowlist any host that answers the URL
+  // could inject labels, so refuse to start rather than ingest one unverified.
+  //
+  // Read from the raw environment rather than the parsed result, so a bad allowlist is reported
+  // alongside any other problem instead of only after that one is fixed.
+  const indexerSigners = (env.INDEXER_SIGNERS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  if ((env.INDEXER_FEED_URL ?? '').trim() !== '') {
+    if (indexerSigners.length === 0) {
+      problems.push('INDEXER_SIGNERS: required when INDEXER_FEED_URL is set (comma-separated EVM addresses)')
+    }
+    const bad = indexerSigners.filter((s) => !EVM_ADDRESS.test(s))
+    if (bad.length) problems.push(`INDEXER_SIGNERS: not valid EVM addresses: ${bad.join(', ')}`)
+  }
+
   if (problems.length) throw new ConfigError(problems)
   const d = scalar.data!
 
   return Object.freeze({
     nodeEnv: d.NODE_ENV,
-    privateKey: d.PRIVATE_KEY,
+    operatorPrivateKey: d.OPERATOR_PRIVATE_KEY,
     chains: Object.freeze(chains),
     pollMs: d.POLL_MS,
     confirmations: d.DVN_CONFIRMATIONS,
@@ -194,5 +277,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: d.LOG_LEVEL,
     checkpointPath: d.CHECKPOINT_PATH,
     testDenylist: d.TEST_DENYLIST,
+    indexerFeedUrl: d.INDEXER_FEED_URL,
+    indexerSigners: Object.freeze(indexerSigners),
+    feedMaxSkewSec: d.FEED_MAX_SKEW_SEC,
+    degradedMode: d.DEGRADED_MODE,
+    emitVerdictFor: Object.freeze(d.EMIT_VERDICT_EVENTS),
   })
 }

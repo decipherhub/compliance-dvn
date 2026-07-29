@@ -1,10 +1,14 @@
+import { existsSync, readFileSync } from 'fs'
+import path from 'path'
+
 import { task } from 'hardhat/config'
 
-const TOY_OFT = '0xdEc1591D39ECb8278d1a2256a5BF17507A375F00'
+import { OAPP_CONTRACT } from '../oapp.contract'
+
 const CLEAN_RECIPIENT = '0x000000000000000000000000000000000000cCCc'
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)']
 
-task('demo:clean', 'Send ToyOFT to a CLEAN (non-flagged) recipient — expect DELIVERED')
+task('demo:clean', `Send ${OAPP_CONTRACT} to a CLEAN (non-flagged) recipient — expect DELIVERED`)
     .addOptionalParam('to', 'clean recipient address', CLEAN_RECIPIENT)
     .addOptionalParam('dst', 'destination: base|opt', 'base')
     .addOptionalParam('amount', 'human amount', '1')
@@ -13,7 +17,7 @@ task('demo:clean', 'Send ToyOFT to a CLEAN (non-flagged) recipient — expect DE
         await hre.run('demo:send', { to: args.to, dst: args.dst, amount: args.amount })
     })
 
-task('demo:veto', 'Send ToyOFT to the FLAGGED recipient — expect VETO (never delivered)')
+task('demo:veto', `Send ${OAPP_CONTRACT} to the FLAGGED recipient — expect VETO (never delivered)`)
     .addOptionalParam('dst', 'destination: base|opt', 'base')
     .addOptionalParam('amount', 'human amount', '1')
     .setAction(async (args, hre) => {
@@ -26,7 +30,7 @@ task('demo:veto', 'Send ToyOFT to the FLAGGED recipient — expect VETO (never d
         await hre.run('demo:send', { to: flagged, dst: args.dst, amount: args.amount })
     })
 
-task('demo:show', 'Read-only: show ToyOFT balances for clean + flagged recipients on destination chain')
+task('demo:show', `Read-only: show ${OAPP_CONTRACT} balances for clean + flagged recipients on destination chain`)
     .addOptionalParam('dst', 'destination: base|opt', 'base')
     .setAction(async (args, hre) => {
         const flagged = process.env.TEST_DENYLIST || ''
@@ -37,19 +41,29 @@ task('demo:show', 'Read-only: show ToyOFT balances for clean + flagged recipient
                 : process.env.RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org'
 
         const provider = new hre.ethers.providers.JsonRpcProvider(rpc)
-        const token = new hre.ethers.Contract(TOY_OFT, ERC20_ABI, provider)
+
+        // Read the token address from the DESTINATION network's deployment record. Balances have to
+        // be read on the chain the transfer landed on, and the address used to be a hardcoded
+        // constant — which silently reported balances for an unrelated token after any redeploy.
+        const dstNetwork = args.dst === 'opt' ? 'optimism-sepolia' : 'base-sepolia'
+        const recordPath = path.join(__dirname, '..', 'deployments', dstNetwork, `${OAPP_CONTRACT}.json`)
+        if (!existsSync(recordPath)) {
+            throw new Error(`no ${OAPP_CONTRACT} deployment found for ${dstNetwork} — deploy it there first`)
+        }
+        const tokenAddress = (JSON.parse(readFileSync(recordPath, 'utf8')) as { address: string }).address
+        const token = new hre.ethers.Contract(tokenAddress, ERC20_ABI, provider)
 
         const cleanBal = await token.balanceOf(CLEAN_RECIPIENT)
         const cleanFmt = hre.ethers.utils.formatEther(cleanBal)
 
         const network = args.dst === 'opt' ? 'Optimism Sepolia' : 'Base Sepolia'
-        console.log(`\n=== ToyOFT balances on ${network} ===\n`)
-        console.log(`CLEAN   ${CLEAN_RECIPIENT} : ${cleanFmt} TOY   (delivered)`)
+        console.log(`\n=== ${OAPP_CONTRACT} balances on ${network} (${tokenAddress}) ===\n`)
+        console.log(`CLEAN   ${CLEAN_RECIPIENT} : ${cleanFmt}   (delivered)`)
 
         if (flagged) {
             const flaggedBal = await token.balanceOf(flagged)
             const flaggedFmt = hre.ethers.utils.formatEther(flaggedBal)
-            console.log(`FLAGGED ${flagged} : ${flaggedFmt} TOY  (vetoed, never delivered)`)
+            console.log(`FLAGGED ${flagged} : ${flaggedFmt}  (vetoed, never delivered)`)
         } else {
             console.log('FLAGGED <not set>  — set TEST_DENYLIST in .env to see the vetoed balance')
         }

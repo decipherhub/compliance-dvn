@@ -1,22 +1,52 @@
 import { ethers } from 'ethers'
+import type { OnChainVerdict } from '../assess/verdict'
 
 const DVN_ABI = [
-  'function submitVerification(bytes packetHeader, bytes32 payloadHash, uint64 confirmations) external',
+  'function submitVerification(bytes packetHeader, bytes32 payloadHash, uint64 confirmations, uint8 action, uint16 score, uint256 reasonMask, bytes32 evidenceHash) external',
+  'function approvePacket(bytes32 payloadHash) external',
 ]
 
 const RECEIVE_ULN_ABI = [
   'function commitVerification(bytes packetHeader, bytes32 payloadHash) external',
 ]
 
+/**
+ * Attest a packet and record the verdict that permitted it. The contract only accepts
+ * ACTION_ALLOW here, so the caller must have decided to allow the packet.
+ */
 export async function submitVerification(
   signer: ethers.Signer,
   dvnAddress: string,
   packetHeader: string,
   payloadHash: string,
   confirmations: number,
+  verdict: OnChainVerdict,
 ): Promise<string> {
   const dvn = new ethers.Contract(dvnAddress, DVN_ABI, signer)
-  const tx = await dvn.submitVerification(packetHeader, payloadHash, confirmations)
+  const tx = await dvn.submitVerification(
+    packetHeader,
+    payloadHash,
+    confirmations,
+    verdict.action,
+    verdict.score,
+    ethers.BigNumber.from(verdict.reasonMask.toString()),
+    verdict.evidenceHash,
+  )
+  const receipt = await tx.wait()
+  return receipt.transactionHash
+}
+
+/**
+ * Approve a packet the worker withheld for manual review. Owner-only on-chain, so the signer
+ * here is the owner key — never the worker's operator key.
+ */
+export async function approvePacket(
+  signer: ethers.Signer,
+  dvnAddress: string,
+  payloadHash: string,
+): Promise<string> {
+  const dvn = new ethers.Contract(dvnAddress, DVN_ABI, signer)
+  const tx = await dvn.approvePacket(payloadHash)
   const receipt = await tx.wait()
   return receipt.transactionHash
 }

@@ -1,10 +1,33 @@
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
-const DVN_BASE = process.env.DVN_BASE_SEPOLIA || '0x0000000000000000000000000000000000000000'
-const DVN_OPT = process.env.DVN_OPTIMISM_SEPOLIA || '0x0000000000000000000000000000000000000000'
+import { OAPP_CONTRACT } from './oapp.contract'
 
-const base = { eid: EndpointId.BASESEP_V2_TESTNET, contractName: 'ToyOFT' }
-const opt = { eid: EndpointId.OPTSEP_V2_TESTNET, contractName: 'ToyOFT' }
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * Read a deployed ComplianceDVN address, refusing to fall back to a placeholder.
+ *
+ * Wiring is the step that tells the ULN which DVN a pathway REQUIRES. A zero or malformed address
+ * here does not fail loudly at wire time — it succeeds, and every subsequent message on that
+ * pathway becomes permanently unverifiable because the required DVN has no code to verify with.
+ * Failing here costs one clear error; not failing costs a re-wire and stuck packets.
+ */
+function requireDvn(envVar: string): string {
+    const value = (process.env[envVar] ?? '').trim()
+    if (!EVM_ADDRESS.test(value)) {
+        throw new Error(
+            `${envVar} must be the deployed ComplianceDVN address (0x + 40 hex) before wiring. ` +
+                `Deploy first, then set it in .env — wiring with a placeholder would require a DVN that cannot verify.`
+        )
+    }
+    return value
+}
+
+const DVN_BASE = requireDvn('DVN_BASE_SEPOLIA')
+const DVN_OPT = requireDvn('DVN_OPTIMISM_SEPOLIA')
+
+const base = { eid: EndpointId.BASESEP_V2_TESTNET, contractName: OAPP_CONTRACT }
+const opt = { eid: EndpointId.OPTSEP_V2_TESTNET, contractName: OAPP_CONTRACT }
 
 // One ULN config per chain, referencing THAT chain's ComplianceDVN as the single required DVN.
 const ulnBase = {

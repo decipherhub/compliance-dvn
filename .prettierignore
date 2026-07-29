@@ -17,5 +17,6 @@ package.json
 # Generated deployment artifacts (ABIs, solcInputs) — not hand-authored source.
 deployments/
 
-# Standalone Node 20 worker package: formatted via its own toolchain, not the root.
+# Standalone Node 20 packages: formatted via their own toolchains, not the root.
 worker/
+indexer/

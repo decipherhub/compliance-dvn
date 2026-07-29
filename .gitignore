@@ -28,3 +28,6 @@ docs/superpowers/
 
 # presentation deck — kept local, not uploaded
 presentation/
+
+# worker runtime state (scan checkpoint, deferred queue, approvals) — per-deployment, not source
+worker/.context/

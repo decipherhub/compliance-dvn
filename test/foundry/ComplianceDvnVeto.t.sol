@@ -201,8 +201,9 @@ contract ComplianceDvnVetoTest is TestHelperOz5 {
         bytes memory header = this._headerOf(packet);
         bytes32 payloadHash = this._payloadHashOf(packet);
 
-        // Operator (this test) routes verification THROUGH our ComplianceDVN.
-        dvnB.submitVerification(header, payloadHash, CONFIRMATIONS);
+        // Operator (this test) routes verification THROUGH our ComplianceDVN, carrying the
+        // allow verdict that permitted it (score 0, no reasons).
+        dvnB.submitVerification(header, payloadHash, CONFIRMATIONS, dvnB.ACTION_ALLOW(), 0, 0, bytes32(0));
 
         // Now the required DVN has verified -> commit succeeds.
         IReceiveUlnConfigurable(address(dvnB.receiveUln())).commitVerification(header, payloadHash);
