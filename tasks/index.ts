@@ -1,8 +1,6 @@
 import './configureDvn'
 import './preflight'
 import './verifyWiring'
-import './demo'
-import './demoSend'
 import './sendOFT'
 import './simple-workers-mock/commit'
 import './simple-workers-mock/commitAndExecute'

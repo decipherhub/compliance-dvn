@@ -65,6 +65,20 @@ describe('REASON_BITS', () => {
     expect(REASON_BITS.scam_token).toBe(2)
     expect(REASON_BITS.operator_deny).toBe(3)
   })
+
+  it('carries the depth-2/3 proximity codes added in policy v2', () => {
+    const codes = [
+      'sanctions_2hop',
+      'sanctions_3hop',
+      'sanctions_2hop_inbound',
+      'sanctions_3hop_inbound',
+      'mixer_exposure_2hop',
+      'mixer_exposure_3hop',
+    ]
+    const { mask, unmapped } = reasonMask(codes)
+    expect(unmapped).toEqual([])
+    expect(decodeReasonMask(mask).sort()).toEqual([...codes].sort())
+  })
 })
 
 describe('reasonMask', () => {

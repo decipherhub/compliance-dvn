@@ -1,7 +1,7 @@
 import { ethers } from 'ethers'
 import type { Db } from '../db'
 import { canonicalize } from './canonical'
-import { computeOneHop } from '../graph/onehop'
+import { computeProximity } from '../graph/proximity'
 import { unverifiedContracts } from '../verify/refresh'
 
 /**
@@ -56,12 +56,12 @@ export async function nextVersion(db: Db): Promise<number> {
  *
  * `unverified_contract` is only worth publishing where it can change an outcome. On its own it
  * scores 20, below the worker's delay threshold, so an address carrying nothing else would be
- * feed weight for no effect. It becomes meaningful in combination — with a one-hop label here, or
- * with the `upgradeable_proxy` the worker observes for itself — so it is published for addresses
- * the graph already has something to say about.
+ * feed weight for no effect. It becomes meaningful in combination — with a proximity label here,
+ * or with the `upgradeable_proxy` the worker observes for itself — so it is published for
+ * addresses the graph already has something to say about.
  */
 export async function collectEntries(db: Db): Promise<FeedEntry[]> {
-  const labelled = await computeOneHop(db)
+  const labelled = await computeProximity(db)
   const unverified = new Set(await unverifiedContracts(db))
 
   const entries = labelled.map((l) => ({

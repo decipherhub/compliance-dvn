@@ -596,9 +596,9 @@
     },
     {
       "id": 18,
-      "title": "Labelled subjects by label",
+      "title": "Feed watchlist (latest published feed)",
       "type": "table",
-      "description": "What the one-hop graph currently says. These are exactly the labels published in the feed.",
+      "description": "Entries of the newest signed feed — the labels the worker actually ingests.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "${pg}"
@@ -613,7 +613,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH outbound AS (SELECT DISTINCT e.from_addr AS subject, CASE s.label WHEN 'sanctions' THEN 'sanctions_1hop' WHEN 'sanctioned_mixer' THEN 'mixer_exposure' END AS label FROM edges e JOIN seed_labels s ON s.subject = e.to_addr LEFT JOIN seed_labels z ON z.subject = e.from_addr WHERE e.from_addr <> e.to_addr AND z.subject IS NULL), inbound AS (SELECT DISTINCT e.to_addr AS subject, CASE s.label WHEN 'sanctions' THEN 'sanctions_1hop_inbound' WHEN 'sanctioned_mixer' THEN 'mixer_exposure' END AS label FROM edges e JOIN seed_labels s ON s.subject = e.from_addr JOIN token_minimums m ON m.chain = e.chain AND m.token = e.token LEFT JOIN seed_labels z ON z.subject = e.to_addr WHERE e.from_addr <> e.to_addr AND e.value >= m.min_value AND z.subject IS NULL) SELECT label, count(DISTINCT subject) AS subjects FROM (SELECT * FROM outbound UNION SELECT * FROM inbound) t WHERE label IS NOT NULL GROUP BY label ORDER BY subjects DESC",
+          "rawSql": "SELECT e->>'address' AS address,\n  array_to_string(ARRAY(SELECT json_array_elements_text(e->'labels')), ', ') AS labels\nFROM (SELECT json_array_elements((document::json)->'entries') AS e\n        FROM feeds ORDER BY version DESC LIMIT 1) t\nORDER BY 1",
           "refId": "A"
         }
       ]

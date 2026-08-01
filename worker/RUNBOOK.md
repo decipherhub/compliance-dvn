@@ -13,7 +13,7 @@ on any uncertainty it withholds rather than risk approving a sanctioned transfer
 - `runtime/tx-sender.ts` — nonce tracking, gas escalation, bounded retries.
 - `runtime/http.ts` — `/healthz` `/readyz` `/metrics`.
 - `runtime/lifecycle.ts` — graceful shutdown.
-- `service.ts` — composes the above into the poll loop. `cli.ts` — operator one-shots.
+- `service.ts` — composes the above into the poll loop.
 
 ## States (see `dvn_ready`, `dvn_halted`)
 
@@ -32,9 +32,10 @@ the halt is screened once the worker recovers. Expect a short backlog spike on r
 ```bash
 cp worker/.env.example worker/.env   # fill OPERATOR_PRIVATE_KEY + DVN_* addresses
 pnpm worker                          # from the repo root; or cd worker, then pnpm start
-pnpm cli -- assess 0x<address>
-pnpm cli -- verify baseSepolia 0x<txhash> --dry-run
 ```
+
+Held packets, screening results, and owner actions (approve / reject) live in the demo dashboard —
+`demo/dashboard/` — or the worker's own HTTP surface (`/status`, `/pending`).
 
 Health: `curl localhost:9090/healthz` · `:9090/readyz` · `:9090/metrics`.
 

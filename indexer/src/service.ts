@@ -123,10 +123,23 @@ async function main(): Promise<void> {
     logger,
     feed: () => latestFeed(db),
     isReady: () => running && scannedOnce,
+    db,
+    statusInfo: () => ({
+      chains: config.chains.map((c) => ({ key: c.key, eid: c.eid, chainId: c.chainId, dvn: c.dvn })),
+      trackedTokens: config.trackedTokens,
+      tokenMinimums: config.tokenMinimums,
+      policyVersion: config.policyVersion,
+      feedSource: config.feedSource,
+    }),
   })
 
   let lastFeedAt = 0
   while (running) {
+    // A new transfer edge is what can change proximity, so the feed is rebuilt on the same tick it
+    // arrives rather than waiting out the interval. The interval still applies to everything else
+    // (seed changes, verification results), which no single scan reveals.
+    let graphChanged = false
+
     for (const chain of config.chains) {
       if (!running) break
       try {
@@ -139,13 +152,15 @@ async function main(): Promise<void> {
           scanWindow: config.scanWindow,
           scanChunk: config.scanChunk,
           reorgDepth: config.reorgDepth,
+          chainByEid: (eid) => config.chains.find((c) => c.eid === eid)?.key,
           logger,
         })
         metrics.chainHeadBlock.set({ chain: chain.key }, result.head)
         metrics.cursorBlock.set({ chain: chain.key }, result.to)
         metrics.verdictsIngested.inc({ chain: chain.key }, result.verdicts)
         metrics.approvalsIngested.inc({ chain: chain.key }, result.approvals)
-        metrics.edgesIngested.inc({ chain: chain.key }, result.transfers)
+        metrics.edgesIngested.inc({ chain: chain.key }, result.transfers + result.bridgeSends)
+        if (result.transfers > 0 || result.bridgeSends > 0) graphChanged = true
         if (result.reorgDepth > 0) {
           metrics.reorgs.inc({ chain: chain.key })
           metrics.reorgBlocksUnwound.inc({ chain: chain.key }, result.reorgDepth)
@@ -181,7 +196,20 @@ async function main(): Promise<void> {
     }
     scannedOnce = true
 
-    if (running && Date.now() - lastFeedAt >= config.feedRebuildMs) {
+    if (running && (graphChanged || Date.now() - lastFeedAt >= config.feedRebuildMs)) {
+      if (graphChanged) logger.info('new transfer edges — rebuilding the feed immediately')
+      // Seeds first, on the same cadence as the feed: the proximity labels published below are
+      // only as fresh as the seed set, and an OFAC update must reach a long-running indexer
+      // without a restart. A failed refresh keeps the previous seeds — the initial load already
+      // guaranteed a non-empty set — and the feed still publishes, loudly degraded.
+      try {
+        const seeds = await refreshSeeds(store)
+        metrics.seedCount.set(seeds)
+        metrics.seedRefreshTotal.inc({ result: 'success' })
+      } catch (err) {
+        metrics.seedRefreshTotal.inc({ result: 'failure' })
+        logger.warn({ err: (err as Error).message }, 'seed refresh failed; keeping the previous seed set')
+      }
       try {
         const feed = await buildAndPublish(db, {
           source: config.feedSource,

@@ -60,6 +60,29 @@ describe('assess', () => {
     expect(r.action).toBe('manual-review')
   })
 
+  it('grades graph proximity by depth: 2 hops delays, 3 hops alone allows', async () => {
+    const two = new RiskStore()
+    two.upsert({ subject: A, labels: ['sanctions_2hop'], source: 'trusted_indexer' })
+    const r2 = await makeAssessor(two)(A)
+    expect(r2.score).toBe(45)
+    expect(r2.action).toBe('delay')
+
+    const three = new RiskStore()
+    three.upsert({ subject: A, labels: ['sanctions_3hop'], source: 'trusted_indexer' })
+    const r3 = await makeAssessor(three)(A)
+    expect(r3.score).toBe(25)
+    expect(r3.action).toBe('allow') // context on its own, never an action
+  })
+
+  it('lets distant proximity combine with other signals', async () => {
+    const store = new RiskStore()
+    // 25 + 35 = 60 -> manual-review; neither label alone reaches it.
+    store.upsert({ subject: A, labels: ['sanctions_3hop', 'mixer_exposure_2hop'], source: 'trusted_indexer' })
+    const r = await makeAssessor(store)(A)
+    expect(r.score).toBe(60)
+    expect(r.action).toBe('manual-review')
+  })
+
   it('delays a weak contract signal', async () => {
     const store = new RiskStore()
     store.upsert({ subject: A, subjectType: 'contract', labels: ['contract_admin_risk'], source: 'trusted_indexer' })

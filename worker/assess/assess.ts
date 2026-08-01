@@ -259,6 +259,27 @@ export interface BuildRiskStoreOptions {
  * failure is reported as degraded and the build still succeeds. Whether degraded is allowed to
  * keep verifying is the operator's call, not this function's.
  */
+/**
+ * Re-ingest just the indexer feed into an existing store.
+ *
+ * A full rebuild re-downloads OFAC and OpenSanctions, which is why it runs on a long timer. The
+ * feed is a single local request, so it can be refreshed far more often — which is what makes a
+ * newly published graph label visible in seconds instead of on the next rebuild.
+ *
+ * Feed entries expire on their own (`expiresAt`), so ingesting into a live store rather than a
+ * fresh one is safe: an address the indexer drops stops being scored when its TTL lapses, and the
+ * next full rebuild removes it outright.
+ */
+export async function refreshFeedInto(store: RiskStore, opts: BuildRiskStoreOptions = {}): Promise<number> {
+  if (!opts.feed || !opts.feedDeps) return 0
+  try {
+    return await ingestFeed(store, opts.feed, opts.feedDeps)
+  } catch (err) {
+    opts.onDegraded?.('trusted_indexer', err as Error)
+    return 0
+  }
+}
+
 export async function buildRiskStore(opts: BuildRiskStoreOptions = {}): Promise<RiskStoreBuild> {
   const store = new RiskStore()
   await ingestOfac(store)

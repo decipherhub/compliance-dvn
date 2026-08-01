@@ -2,7 +2,7 @@
   "name": "compliance-dvn-worker",
   "version": "1.0.0",
   "private": true,
-  "description": "LayerZero Compliance DVN — sanctions-screening verifier worker + operator CLI",
+  "description": "LayerZero Compliance DVN — sanctions-screening verifier worker",
   "license": "MIT",
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -10,13 +10,11 @@
   },
   "scripts": {
     "start": "tsx service.ts",
-    "cli": "tsx cli.ts",
     "test": "vitest run test",
     "test:watch": "vitest test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "commander": "^15.0.0",
     "dotenv": "^17.4.2",
     "ethers": "^5.7.2",
     "node-fetch": "^3.3.2",

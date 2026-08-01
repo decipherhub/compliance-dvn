@@ -171,4 +171,19 @@ describe('isRetriableTxError', () => {
     expect(isRetriableTxError({ code: 'CALL_EXCEPTION' } as Error & { code: string })).toBe(false)
     expect(isRetriableTxError(new Error('boom'))).toBe(false)
   })
+
+  // A failed gas estimate arrives under one code whether the node hiccuped or the call reverts.
+  // Retrying a revert only spends the backoff and reports a settled outcome as a transient one.
+  it('separates a reverting gas estimate from a flaky one', () => {
+    const reverting = Object.assign(
+      new Error('cannot estimate gas ... (error={"reason":"execution reverted","data":"0x4c3118d4"})'),
+      { code: 'UNPREDICTABLE_GAS_LIMIT' },
+    )
+    expect(isRetriableTxError(reverting)).toBe(false)
+
+    const flaky = Object.assign(new Error('cannot estimate gas; upstream timeout'), {
+      code: 'UNPREDICTABLE_GAS_LIMIT',
+    })
+    expect(isRetriableTxError(flaky)).toBe(true)
+  })
 })

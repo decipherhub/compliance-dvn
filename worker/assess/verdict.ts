@@ -48,6 +48,13 @@ export const REASON_BITS: Record<string, number> = {
   token_check_unavailable: 13,
   /** Set when a held packet was released by an owner approval rather than by re-screening. */
   owner_approved: 14,
+  // Graph-derived, depth 2-3 (policy v2)
+  sanctions_2hop: 15,
+  sanctions_3hop: 16,
+  sanctions_2hop_inbound: 17,
+  sanctions_3hop_inbound: 18,
+  mixer_exposure_2hop: 19,
+  mixer_exposure_3hop: 20,
 }
 
 /** Reserved top bit, set when a reason code has no assigned bit — so nothing vanishes silently. */

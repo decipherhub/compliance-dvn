@@ -196,6 +196,16 @@ task('dvn:preflight', 'Validate deploy prerequisites on the current --network wi
                         `the existing deployment at ${existing.address} predates the RiskVerdict interface; redeploy and re-wire, then update DVN_* in .env`
                     )
                 }
+                // A deployment that predates the assignJob gate accepts jobs from anyone, which
+                // lets a stranger point the worker at packets no one asked it to verify.
+                try {
+                    await dvn.sendUln()
+                    console.log('  exposes sendUln — assignJob is gated to the send library')
+                } catch {
+                    warnings.push(
+                        `the existing deployment at ${existing.address} predates the assignJob send-library gate; redeploy and re-wire, then update DVN_* in .env`
+                    )
+                }
             } else {
                 console.log('existing deployment: none (this will be a fresh deploy)')
             }

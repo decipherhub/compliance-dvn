@@ -86,6 +86,29 @@ describe('loadConfig', () => {
     expect(() => loadConfig(baseEnv({ POLL_MS: '0' }))).toThrowError(/POLL_MS/)
   })
 
+  /**
+   * Two different things wore one name. The attested value must satisfy the pathway's ULN
+   * `confirmations` or the destination refuses the packet; how far behind the head we scan is only
+   * a latency choice. Tying them together meant lowering latency broke verification.
+   */
+  describe('scan depth vs attested confirmations', () => {
+    it('defaults the scan depth to the attested value', () => {
+      const cfg = loadConfig(baseEnv({ DVN_CONFIRMATIONS: '5' }))
+      expect(cfg.confirmations).toBe(5)
+      expect(cfg.scanConfirmations).toBe(5)
+    })
+
+    it('lets the scan run closer to the head without lowering what is attested', () => {
+      const cfg = loadConfig(baseEnv({ DVN_CONFIRMATIONS: '5', SCAN_CONFIRMATIONS: '1' }))
+      expect(cfg.confirmations).toBe(5)
+      expect(cfg.scanConfirmations).toBe(1)
+    })
+
+    it('accepts a scan depth of zero', () => {
+      expect(loadConfig(baseEnv({ SCAN_CONFIRMATIONS: '0' })).scanConfirmations).toBe(0)
+    })
+  })
+
   it('validates max staleness is at least one refresh interval', () => {
     expect(() =>
       loadConfig(baseEnv({ DENYLIST_REFRESH_MS: '600000', MAX_DENYLIST_STALENESS_MS: '300000' })),
@@ -149,6 +172,29 @@ describe('loadConfig', () => {
   it('does not complain about PRIVATE_KEY when the operator key is set', () => {
     // A stray PRIVATE_KEY in the shell is not itself a problem; only its use as the signer is.
     expect(() => loadConfig(baseEnv({ PRIVATE_KEY: '0x' + '9'.repeat(64) }))).not.toThrow()
+  })
+
+  /**
+   * The service refuses owner-capable keys even alongside a valid operator key: the owner key
+   * approves the very packets the worker withholds, so the two must never share an environment.
+   * Default options keep accepting them — deploy scripts and one-off shells legitimately hold one.
+   */
+  describe('forbidOwnerKeys (service mode)', () => {
+    it('refuses PRIVATE_KEY even when the operator key is also set', () => {
+      expect(() =>
+        loadConfig(baseEnv({ PRIVATE_KEY: '0x' + '9'.repeat(64) }), { forbidOwnerKeys: true }),
+      ).toThrowError(/PRIVATE_KEY must not be set in the worker service's environment/)
+    })
+
+    it('refuses OWNER_PRIVATE_KEY', () => {
+      expect(() =>
+        loadConfig(baseEnv({ OWNER_PRIVATE_KEY: '0x' + '9'.repeat(64) }), { forbidOwnerKeys: true }),
+      ).toThrowError(/OWNER_PRIVATE_KEY must not be set/)
+    })
+
+    it('boots normally when only the operator key is present', () => {
+      expect(() => loadConfig(baseEnv(), { forbidOwnerKeys: true })).not.toThrow()
+    })
   })
 
   it('rejects an unknown degraded mode', () => {

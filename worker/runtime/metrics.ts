@@ -24,12 +24,15 @@ export interface Metrics {
   readonly checkpointBlock: Gauge<'chain'>
   readonly packetsScanned: Counter<'chain'>
   readonly packetsAssigned: Counter<'chain'>
+  readonly packetsUnparsed: Counter<'chain'>
   readonly scanErrors: Counter<'chain'>
 
   // Verification outcomes
   readonly verifications: Counter<'chain' | 'result'>
   readonly commits: Counter<'chain' | 'result'>
+  readonly deliveries: Counter<'chain' | 'result'>
   readonly decisions: Counter<'chain' | 'action'>
+  readonly screeningEvidence: Counter<'type' | 'source'>
   readonly pendingPackets: Gauge<'action'>
   readonly approvals: Counter<'chain'>
   readonly verdictRecords: Counter<'chain' | 'result'>
@@ -63,11 +66,26 @@ export function createMetrics(): Metrics {
     checkpointBlock: g('dvn_checkpoint_block', 'Last scanned block persisted per chain.', ['chain']),
     packetsScanned: c('dvn_packets_scanned_total', 'PacketSent events scanned per chain.', ['chain']),
     packetsAssigned: c('dvn_packets_assigned_total', 'Packets assigned to our DVN per chain.', ['chain']),
+    packetsUnparsed: c(
+      'dvn_packets_unparsed_total',
+      'PacketSent events skipped as undecodable — normally other OApps on the shared endpoint.',
+      ['chain'],
+    ),
     scanErrors: c('dvn_scan_errors_total', 'Scan/RPC errors per chain.', ['chain']),
 
     verifications: c('dvn_verifications_total', 'submitVerification calls by result.', ['chain', 'result']),
     commits: c('dvn_commits_total', 'commitVerification calls by result.', ['chain', 'result']),
+    deliveries: c(
+      'dvn_deliveries_total',
+      'lzReceive calls by result — the delivery the executor does not perform for custom DVNs.',
+      ['chain', 'result'],
+    ),
     decisions: c('dvn_decisions_total', 'Risk verdicts by action (allow/delay/manual-review/block).', ['chain', 'action']),
+    screeningEvidence: c(
+      'dvn_screening_evidence_total',
+      'Evidence records observed while screening packets, by label type and source — which risk signals actually fire.',
+      ['type', 'source'],
+    ),
     pendingPackets: g('dvn_pending_packets', 'Packets currently held, by action.', ['action']),
     approvals: c('dvn_approvals_total', 'Owner approvals of held packets observed on-chain.', ['chain']),
     verdictRecords: c(

@@ -20,7 +20,6 @@
     "test:forge": "forge test",
     "test:hardhat": "hardhat test",
     "worker": "tsx worker/service.ts",
-    "cli": "tsx worker/cli.ts",
     "test:worker": "vitest run worker/test",
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "docker:worker": "docker build -t compliance-dvn-worker worker/"

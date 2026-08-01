@@ -1,5 +1,5 @@
 import type { Db } from '../db'
-import type { PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
+import type { BridgeSendRow, PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
 
 /**
  * All writes for one chain's scanned range, plus the reorg bookkeeping around them.
@@ -98,6 +98,8 @@ export class IngestStore {
       verdicts: RiskVerdictRow[]
       approvals: PacketApprovalRow[]
       transfers: TransferRow[]
+      /** Cross-chain sends. Each carries the destination chain key, resolved by the caller. */
+      bridgeSends?: Array<BridgeSendRow & { dstChain: string | undefined }>
       blocks: Array<{ number: number; hash: string; parentHash: string; timestamp: number }>
     },
   ): Promise<void> {
@@ -129,6 +131,18 @@ export class IngestStore {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (chain, tx_hash, log_index) DO NOTHING`,
           [chain, t.blockNumber, t.txHash, t.logIndex, t.token, t.from, t.to, t.value],
+        )
+      }
+
+      // Same table, so every graph query sees them without knowing they exist; `kind` keeps a
+      // bridged send distinguishable from a settled same-chain transfer. The OFTSent log has its
+      // own index within the transaction, so it never collides with the burn recorded above.
+      for (const b of data.bridgeSends ?? []) {
+        await tx.query(
+          `INSERT INTO edges (chain, block_number, tx_hash, log_index, token, from_addr, to_addr, value, kind, dst_chain)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'bridge', $9)
+           ON CONFLICT (chain, tx_hash, log_index) DO NOTHING`,
+          [chain, b.blockNumber, b.txHash, b.logIndex, b.token, b.from, b.to, b.value, b.dstChain ?? null],
         )
       }
 

@@ -55,7 +55,15 @@ export interface ResolvedChain {
   chainId: number
   rpc: string
   dvn: string
+  /** EndpointV2 — read for `PacketSent`, which is where a cross-chain send names its recipient. */
+  endpoint: string
 }
+
+/**
+ * EndpointV2 is deployed at one address across every LayerZero V2 chain, so it is a default rather
+ * than required configuration. Overridable per chain for a local or non-standard deployment.
+ */
+export const DEFAULT_ENDPOINT = '0x6EDCE65403992e310A62460808c4b910D972f10f'
 
 /**
  * A per-token inbound threshold.
@@ -171,7 +179,8 @@ const ScalarSchema = z.object({
     .transform((v) => (v === undefined || v.trim() === '' ? 'trusted-indexer-a' : v.trim())),
   FEED_TTL_SEC: intField(7200, 60),
   FEED_REBUILD_MS: intField(600_000, 1000),
-  POLICY_VERSION: intField(1, 0),
+  // v2: graph proximity extended to 3 hops. Must equal the worker's POLICY_VERSION.
+  POLICY_VERSION: intField(2, 0),
   POLL_MS: intField(15_000, 1),
   CONFIRMATIONS: intField(5, 0),
   SCAN_BACKFILL_BLOCKS: intField(5000, 1),
@@ -245,6 +254,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       problems.push(`${s.dvnEnv}: required for enabled chain '${key}' and must be a 20-byte EVM address`)
       continue
     }
+    const endpoint = (env[`ENDPOINT_${key.replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase()}`] ?? '').trim()
+    if (endpoint && !EVM_ADDRESS.test(endpoint)) {
+      problems.push(`ENDPOINT override for '${key}' must be a 20-byte EVM address`)
+      continue
+    }
     chains.push({
       key,
       name: s.name,
@@ -252,6 +266,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       chainId: s.chainId,
       rpc: (env[s.rpcEnv] ?? '').trim() || s.rpcDefault,
       dvn,
+      endpoint: endpoint || DEFAULT_ENDPOINT,
     })
   }
 

@@ -2,6 +2,11 @@ import { parseEther } from 'ethers/lib/utils'
 import { type HardhatRuntimeEnvironment } from 'hardhat/types'
 import { type DeployFunction } from 'hardhat-deploy/types'
 
+const SEND_ULN: Record<number, string> = {
+    40245: '0xC1868e054425D378095A003EcbA3823a5D0135C9', // base-sepolia
+    40232: '0xB31D2cb502E25B30C651842C7C3293c51Fe6d16f', // optimism-sepolia
+}
+
 const RECEIVE_ULN: Record<number, string> = {
     40245: '0x12523de19dc41c91F7d2093E0CFbB76b17012C8d', // base-sepolia
     40232: '0x9284fd59B95b9143AF0b9795CAC16eb3C723C9Ca', // optimism-sepolia
@@ -13,6 +18,8 @@ const deploy: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
     const { deploy } = hre.deployments
     const { deployer } = await hre.getNamedAccounts()
     const eid = (hre.network.config as any).eid as number
+    const sendUln = SEND_ULN[eid]
+    if (!sendUln) throw new Error(`no SendUln302 for eid ${eid}`)
     const receiveUln = RECEIVE_ULN[eid]
     if (!receiveUln) throw new Error(`no ReceiveUln302 for eid ${eid}`)
 
@@ -33,7 +40,7 @@ const deploy: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
 
     await deploy('ComplianceDVN', {
         from: deployer,
-        args: [deployer, operator, receiveUln, parseEther('0.00005')],
+        args: [deployer, operator, sendUln, receiveUln, parseEther('0.00005')],
         log: true,
     })
 }

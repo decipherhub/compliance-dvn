@@ -38,7 +38,7 @@ services:
       FEED_SOURCE: ${FEED_SOURCE:-trusted-indexer-a}
       FEED_TTL_SEC: ${FEED_TTL_SEC:-7200}
       FEED_REBUILD_MS: ${FEED_REBUILD_MS:-600000}
-      POLICY_VERSION: ${POLICY_VERSION:-1}
+      POLICY_VERSION: ${POLICY_VERSION:-2}
       CHAINS_ENABLED: ${CHAINS_ENABLED:-}
       DVN_BASE_SEPOLIA: ${DVN_BASE_SEPOLIA:-}
       DVN_OPTIMISM_SEPOLIA: ${DVN_OPTIMISM_SEPOLIA:-}
@@ -101,6 +101,7 @@ services:
       # Both dashboards are mounted straight from the repo, so they are always the committed
       # version rather than a copy that has drifted in Grafana's own database.
       - ./deploy/grafana-dashboard.json:/var/lib/grafana/dashboards/indexer.json:ro
+      - ./deploy/grafana-demo-dashboard.json:/var/lib/grafana/dashboards/demo.json:ro
       - ../worker/deploy/grafana-dashboard.json:/var/lib/grafana/dashboards/worker.json:ro
       - grafanadata:/var/lib/grafana
     ports:

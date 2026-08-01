@@ -8,7 +8,8 @@ import { SOURCE_TRUST, type EnforcementLevel, type LabelSource } from './sources
  * different policy is rejected instead of silently mixed in.
  */
 
-export const POLICY_VERSION = 1
+/** v2: graph proximity extended from 1 hop to 3, with per-depth labels and weights. */
+export const POLICY_VERSION = 2
 
 export type RiskAction = 'allow' | 'delay' | 'manual-review' | 'block'
 
@@ -25,7 +26,13 @@ export function clampAction(action: RiskAction, ceiling: RiskAction): RiskAction
   return SEVERITY[action] <= SEVERITY[ceiling] ? action : ceiling
 }
 
-/** Score each label contributes. Contributions are summed per subject and capped at 100. */
+/**
+ * Score each label contributes. Contributions are summed per subject and capped at 100.
+ *
+ * Graph proximity is graded by distance: each hop roughly halves the weight, because every
+ * intermediary between the subject and the seed weakens what the edge proves. A 3-hop label on
+ * its own moves no action (25 < the delay threshold) — it exists to combine with other signals.
+ */
 export const LABEL_WEIGHTS: Record<string, number> = {
   sanctions: 100, // OFAC / OpenSanctions direct hit
   sanctioned_mixer: 100,
@@ -36,9 +43,15 @@ export const LABEL_WEIGHTS: Record<string, number> = {
   mixer_exposure: 60,
   honeypot_suspect: 55,
   contract_admin_risk: 50,
+  sanctions_2hop: 45, // one intermediary between the subject and a sanctioned address
   sanctions_1hop_inbound: 40, // a sanctioned address sent TO the subject — see N_HOP
+  mixer_exposure_2hop: 35,
+  sanctions_3hop: 25, // two intermediaries — context that combines, never acts alone
+  sanctions_2hop_inbound: 20,
   unverified_contract: 20,
+  mixer_exposure_3hop: 20,
   upgradeable_proxy: 15,
+  sanctions_3hop_inbound: 10,
 }
 
 /**
@@ -88,21 +101,26 @@ export const DELAY_POLICY = {
 }
 
 /**
- * Graph traversal bounds. Depth is 1: the DVN screens the packet's own counterparties, not
- * the whole laundering path — deeper reach belongs to the external indexer's feed.
+ * Graph traversal bounds. Depth is 3, computed by the external indexer (`graph/proximity.ts`)
+ * and delivered via the signed feed — the DVN itself never walks the graph.
  *
  * Direction is what makes this dusting-resistant. Anyone can push a tainted transfer at a
- * victim, so an INBOUND edge from a sanctioned address is weak evidence and is ignored below
- * the threshold. An OUTBOUND edge is the subject's own act, so no threshold applies.
+ * victim, so INBOUND edges are weak evidence: every edge on an inbound path must clear the
+ * indexer's per-token minimum. An OUTBOUND path starts with the subject's own act (no
+ * threshold), but every edge after the first is someone else's — those must clear the minimum
+ * too, or anyone the subject ever paid could smear them by dusting a sanctioned address.
  *
- * The threshold is denominated in native ETH. Non-native transfers are compared against a
- * per-token minimum held by the indexer; a token with no configured minimum records the edge
- * but contributes no score.
+ * A path counts only if funds could have flowed along it: hops stay on one chain, in
+ * non-decreasing block order, with no seed anywhere but the far endpoint. A token with no
+ * configured minimum records its edges but never extends a path.
  */
 export const N_HOP = {
-  depth: 1,
-  outbound: { minValueEth: 0, label: 'sanctions_1hop' },
-  inbound: { minValueEth: 0.01, label: 'sanctions_1hop_inbound' },
+  depth: 3,
+  outbound: { minValueEth: 0, labels: ['sanctions_1hop', 'sanctions_2hop', 'sanctions_3hop'] },
+  inbound: {
+    minValueEth: 0.01,
+    labels: ['sanctions_1hop_inbound', 'sanctions_2hop_inbound', 'sanctions_3hop_inbound'],
+  },
 }
 
 /**

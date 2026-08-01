@@ -61,8 +61,22 @@ export interface Config {
   readonly operatorPrivateKey: string
   readonly chains: readonly ResolvedChain[]
   readonly pollMs: number
+  /**
+   * Confirmations asserted in `submitVerification`. Must be at least the pathway's ULN
+   * `confirmations`, or the destination does not treat the packet as verifiable.
+   */
   readonly confirmations: number
+  /**
+   * How far behind the head to stop scanning. Independent of the attested value above: reading a
+   * block sooner is a latency choice, while the attested number is a protocol requirement.
+   */
+  readonly scanConfirmations: number
   readonly denylistRefreshMs: number
+  /**
+   * How often to re-ingest the indexer feed alone. Much shorter than a full rebuild because it is
+   * one local request, not a re-download of OFAC and OpenSanctions.
+   */
+  readonly feedRefreshMs: number
   readonly maxDenylistStalenessMs: number
   readonly txMaxRetries: number
   readonly txGasBumpPct: number
@@ -120,7 +134,13 @@ const ScalarSchema = z.object({
     .transform(withHexPrefix),
   POLL_MS: intField(15_000, 1),
   DVN_CONFIRMATIONS: intField(5, 0),
+  /** Defaults to DVN_CONFIRMATIONS below when unset, preserving the previous single-knob behaviour. */
+  SCAN_CONFIRMATIONS: z.preprocess(
+    (v) => (v === undefined || v === '' ? undefined : v),
+    z.coerce.number().int().min(0).optional(),
+  ),
   DENYLIST_REFRESH_MS: intField(1_800_000, 1),
+  FEED_REFRESH_MS: intField(30_000, 1),
   MAX_DENYLIST_STALENESS_MS: intField(3_600_000, 1),
   TX_MAX_RETRIES: intField(3, 0, 20),
   TX_GAS_BUMP_PCT: intField(15, 0, 1000),
@@ -172,12 +192,39 @@ export class ConfigError extends Error {
   }
 }
 
+export interface LoadConfigOptions {
+  /**
+   * Refuse to boot when an owner-capable key is present in the environment, even alongside a
+   * valid OPERATOR_PRIVATE_KEY. The long-running service sets this: the owner key approves the
+   * very packets the worker withholds, so the two must never share a process environment. Owner
+   * actions (approve, skip) are signed elsewhere — in MetaMask via the dashboard, or a deploy
+   * shell — never by this process.
+   */
+  forbidOwnerKeys?: boolean
+}
+
+/** Env vars that carry owner authority; see the deploy scripts. */
+const OWNER_KEY_VARS = ['PRIVATE_KEY', 'OWNER_PRIVATE_KEY'] as const
+
 /**
  * Validate the environment and resolve the active chain set. Fails fast with a single
  * aggregated error enumerating every problem, so an operator fixes one boot, not ten.
  */
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, opts: LoadConfigOptions = {}): Config {
   const problems: string[] = []
+
+  if (opts.forbidOwnerKeys) {
+    for (const key of OWNER_KEY_VARS) {
+      if ((env[key] ?? '').trim()) {
+        problems.push(
+          `${key} must not be set in the worker service's environment. It is an OWNER key — the one ` +
+            'that approves held packets — and a worker holding it could release its own holds. Keep it ' +
+            'in your deploy shell (owner actions are signed in MetaMask via the dashboard) and give ' +
+            'the service only OPERATOR_PRIVATE_KEY.',
+        )
+      }
+    }
+  }
 
   const scalar = ScalarSchema.safeParse(env)
   if (!scalar.success) {
@@ -269,7 +316,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     chains: Object.freeze(chains),
     pollMs: d.POLL_MS,
     confirmations: d.DVN_CONFIRMATIONS,
+    scanConfirmations: d.SCAN_CONFIRMATIONS ?? d.DVN_CONFIRMATIONS,
     denylistRefreshMs: d.DENYLIST_REFRESH_MS,
+    feedRefreshMs: d.FEED_REFRESH_MS,
     maxDenylistStalenessMs: d.MAX_DENYLIST_STALENESS_MS,
     txMaxRetries: d.TX_MAX_RETRIES,
     txGasBumpPct: d.TX_GAS_BUMP_PCT,

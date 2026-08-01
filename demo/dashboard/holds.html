@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compliance DVN — 보류 패킷</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Compliance DVN</h1>
+  <nav id="nav"></nav>
+  <div id="health"></div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="row">
+      <h2 style="margin:0">보류 패킷 — owner 검토<span id="help-holds"></span></h2>
+      <span class="spacer"></span>
+      <span id="wallet-row" class="row"><button id="connect" class="ghost sm">owner 지갑 연결</button></span>
+      <button class="ghost sm" id="refresh">새로고침</button>
+    </div>
+    <div id="owner-warn"></div>
+    <div id="holds" style="margin-top:14px"></div>
+    <div id="status" class="status"></div>
+  </section>
+
+  <section class="card">
+    <h2>메시지 채널 상태<span id="help-channel"></span></h2>
+    <div id="channels"></div>
+    <h3 style="margin-top:20px">실행 대기 중인 nonce</h3>
+    <div id="nonce-detail"></div>
+    <div id="channel-status" class="status"></div>
+  </section>
+
+  <section class="card">
+    <h2>온체인에 기록된 승인 내역<span id="help-approvals"></span></h2>
+    <div id="approvals"></div>
+  </section>
+
+  <section class="card">
+    <h2>수동 승인<span id="help-manual"></span></h2>
+    <div class="grid three">
+      <div>
+        <label for="chain">도착 체인</label>
+        <select id="chain"></select>
+      </div>
+      <div style="grid-column: span 2">
+        <label for="hash">Payload 해시</label>
+        <input id="hash" class="mono" placeholder="0x… (16진수 64자)">
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="approve-manual">패킷 승인</button>
+    </div>
+    <div id="manual-status" class="status"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="lib.js"></script>
+<script>
+mountHeader('holds.html')
+
+// Rationale behind each panel, revealed on hover instead of occupying the layout.
+$('#help-holds').innerHTML = helpMark(`
+  <p><span class="badge hold" title="manual-review">수동 검토</span> 보류는 시간이 지나도 절대 자동으로
+     풀리지 않습니다.</p>
+  <p><b>승인</b>은 DVN owner만이 온체인 <span class="mono">approvePacket</span> 호출로 할 수 있습니다 —
+     worker는 operator 키만 갖고 있어서 자기가 보류한 패킷을 스스로 승인할 수 없습니다.</p>
+  <p><b>거절</b>은 엔드포인트에서 그 패킷의 nonce를 <span class="mono">skip</span> 합니다. 승인과 달리
+     DVN에 요청하는 것이 아니라 채널에서 그 자리를 아예 빼버리는 것이라, 이후 재심사·라벨 만료·worker
+     재시작으로도 되살아나지 않습니다.</p>
+  <p>거절은 채널 순서상 <b>맨 앞 nonce</b>에만 가능합니다 — 앞 순서가 남아 있으면 어느 것을 먼저
+     처리해야 하는지 알려줍니다.</p>`)
+$('#help-channel').innerHTML = helpMark(`
+  <p>차단된 패킷은 검증되지 않으므로 그 nonce가 영구히 비어 있습니다. LayerZero 채널은 nonce를
+     <b>순서대로만</b> 처리하기 때문에, 그 뒤의 정상 메시지들도 함께 막힙니다.</p>
+  <p><b>거절</b>(<span class="mono">skip</span>)은 그 자리를 비우고 지나가는 유일한 방법입니다 — 특정
+     메시지를 포기한다는 행정적 결정이라 worker가 아니라 owner(OApp delegate)의 권한입니다.</p>
+  <p>토큰별로 채널이 따로 있어 nonce도 따로 셉니다. 커밋된 nonce는 이미 검증된 것이라 거절할 수
+     없습니다.</p>`)
+$('#help-approvals').innerHTML = helpMark(`
+  <p>indexer가 <span class="mono">PacketApproved</span> 이벤트에서 수집합니다.</p>
+  <p>사람이 개입한 모든 해제의 감사 추적입니다.</p>`)
+$('#help-manual').innerHTML = helpMark(`
+  <p>위 목록에 보류 건이 나타나지 않는 경우(예: worker가 중지된 상태) payload 해시로 직접 승인할 수
+     있습니다.</p>
+  <p>승인은 해당 패킷을 검증할 체인 — 즉 도착 체인 — 의 DVN에 기록됩니다.</p>`)
+
+for (const [key, c] of Object.entries(CHAINS)) {
+  $('#chain').insertAdjacentHTML('beforeend', `<option value="${key}">${c.label}</option>`)
+}
+
+let account
+let connectedWallet = ''
+
+/** One line in either state: a button to connect, or the connection itself. */
+function renderWallet() {
+  const row = $('#wallet-row')
+  if (!account) {
+    row.innerHTML = '<button id="connect" class="ghost sm">owner 지갑 연결</button>'
+    $('#connect').onclick = doConnect
+    return
+  }
+  row.innerHTML = `<span class="mono" title="${account}">${account}</span>
+    <span class="lamp" title="${connectedWallet} 연결됨"><i class="dot ok"></i>${connectedWallet}</span>`
+}
+
+async function doConnect() {
+  try {
+    const { address, wallet } = await connect()
+    account = address
+    connectedWallet = wallet
+    renderWallet()
+    checkOwner()
+    onWalletChange(({ accounts }) => {
+      if (accounts && accounts.length === 0) {
+        account = ''
+        connectedWallet = ''
+        renderWallet()
+        $('#owner-warn').innerHTML = ''
+        return
+      }
+      if (accounts && accounts[0]) account = accounts[0]
+      renderWallet()
+      checkOwner()
+    })
+  } catch (e) {
+    setStatus($('#status'), e.message, 'err')
+  }
+}
+$('#connect').onclick = doConnect
+
+/**
+ * Warn early when the connected wallet is not the DVN owner.
+ *
+ * `approvePacket` is onlyOwner, so a non-owner attempt reverts — but it reverts inside MetaMask
+ * as an opaque gas-estimation failure. Reading `owner()` first turns that into a sentence.
+ */
+async function checkOwner() {
+  if (!account) return
+  const mismatches = []
+  for (const [key, c] of Object.entries(CHAINS)) {
+    try {
+      const owner = await new ethers.Contract(c.dvn, DVN_ABI, readProvider(key)).owner()
+      if (owner.toLowerCase() !== account.toLowerCase()) mismatches.push(`${c.label}: owner는 ${short(owner)}`)
+    } catch {
+      mismatches.push(`${c.label}: owner() 조회 실패`)
+    }
+  }
+  $('#owner-warn').innerHTML = mismatches.length
+    ? `<p class="status err">이 지갑은 DVN owner가 아닙니다 — 승인 트랜잭션이 revert됩니다. ${mismatches.join(' · ')}</p>`
+    : '<p class="status ok">연결된 지갑이 두 체인 모두에서 DVN owner입니다.</p>'
+}
+
+/**
+ * Reject one held packet: skip its nonce on the destination endpoint.
+ *
+ * The mirror image of approval, and deliberately a different mechanism. Approval asks the DVN to
+ * let a packet through; rejection does not ask anything — it takes the slot out of the channel, so
+ * no later re-screen, expiring label, or restarted worker can revive the packet. The worker sees
+ * the skip on its next pass and drops the hold.
+ */
+async function reject(chainKey, header, statusEl) {
+  if (!account) throw new Error('먼저 owner 지갑을 연결하세요')
+  if (!header) throw new Error('이 보류 기록에는 패킷 헤더가 없어 거절할 수 없습니다')
+
+  // Checked before the wallet opens: nonces clear in order, so an out-of-turn rejection would fail
+  // as LZ_InvalidNonce after the operator had already signed.
+  const { ok, next, nonce } = await skipEligibility(chainKey, header)
+  if (!ok) {
+    throw new Error(
+      `이 패킷은 nonce ${nonce}인데 채널이 다음으로 처리할 자리는 nonce ${next}입니다. ` +
+        `LayerZero는 nonce를 순서대로만 비우므로 nonce ${next}을 먼저 처리(승인 또는 거절)하세요.`,
+    )
+  }
+
+  setStatus(statusEl, '지갑에서 승인하세요…', 'busy')
+  const hash = await skipPacket(chainKey, header)
+  setStatus(
+    statusEl,
+    `거절 완료 — nonce ${nonce}을 건너뛰었습니다. ${txLink(chainKey, hash)} 이 패킷은 영구히 배달될 수
+     없으며, worker가 다음 스캔에서 보류 큐에서 제거합니다.`,
+    'ok',
+  )
+}
+
+/** Approve one held packet. Signed in MetaMask: no key ever reaches this page or its backend. */
+async function approve(chainKey, payloadHash, statusEl) {
+  if (!account) throw new Error('먼저 owner 지갑을 연결하세요')
+  if (!/^0x[0-9a-fA-F]{64}$/.test(payloadHash)) throw new Error('payload 해시는 0x + 16진수 64자여야 합니다')
+  await ensureChain(chainKey)
+  const dvn = new ethers.Contract(CHAINS[chainKey].dvn, DVN_ABI, signer())
+  setStatus(statusEl, '지갑에서 승인하세요…', 'busy')
+  const tx = await dvn.approvePacket(payloadHash)
+  setStatus(statusEl, `승인 처리 중… ${txLink(chainKey, tx.hash)}`, 'busy')
+  await tx.wait()
+  setStatus(
+    statusEl,
+    `승인 완료. ${txLink(chainKey, tx.hash)} — worker가 다음 스캔에서 PacketApproved를 관측하고
+     재심사한 뒤 패킷을 해제합니다.`,
+    'ok',
+  )
+}
+
+$('#approve-manual').onclick = async () => {
+  try {
+    await approve($('#chain').value, $('#hash').value.trim(), $('#manual-status'))
+    loadHolds()
+    loadChannels()
+  } catch (e) {
+    setStatus($('#manual-status'), decodeRpcError(e), 'err')
+  }
+}
+
+/** Map a destination EID back to a chain key, so a hold knows where to be approved. */
+const chainByEid = Object.fromEntries(Object.entries(CHAINS).map(([k, c]) => [c.eid, k]))
+
+/**
+ * Every channel a demo packet can travel: both directions, once per token.
+ *
+ * A channel is keyed by (receiver OApp, srcEid, sender OApp), so each token has its own nonce
+ * sequence and stalls independently — a vetoed testUSDT packet does not hold up 가짜 USDC, and each
+ * needs its own rejection.
+ */
+const PATHWAYS = [
+  ['baseSepolia', 'optimismSepolia'],
+  ['optimismSepolia', 'baseSepolia'],
+].flatMap(([s, d]) => Object.keys(TOKENS).map((tokenKey) => [s, d, tokenKey]))
+
+async function loadChannels() {
+  let rows
+  try {
+    rows = await Promise.all(PATHWAYS.map(([s, d, t]) => channelState(s, d, t)))
+  } catch (e) {
+    $('#channels').innerHTML = `<p class="status err">채널 상태 조회 실패 (${e.message})</p>`
+    return
+  }
+
+  // What each nonce actually was: the send this browser made, plus the verdict the DVN reached.
+  const byNonce = sentByNonce()
+  let verdicts = new Map()
+  try {
+    const res = await indexerApi('/api/verdicts?limit=500')
+    for (const v of res.verdicts) if (!verdicts.has(v.payload_hash)) verdicts.set(v.payload_hash, v)
+  } catch {
+    // Verdicts are the nice-to-have here; the channel state alone still explains the stall.
+  }
+
+  const slotRows = rows.flatMap((r) =>
+    r.slots.map((s) => {
+      const sent = byNonce.get(`${r.srcKey}>${r.dstKey}/${r.tokenKey}:${s.nonce}`)
+      const v = sent?.payloadHash ? verdicts.get(sent.payloadHash.toLowerCase()) : undefined
+      return { ...s, pathway: r, sent, verdict: v }
+    }),
+  )
+
+  $('#nonce-detail').innerHTML = table(
+    slotRows,
+    [
+      ['경로', (r) => `${CHAINS[r.pathway.srcKey].label} → ${CHAINS[r.pathway.dstKey].label}`],
+      ['토큰', (r) => TOKENS[r.pathway.tokenKey].label],
+      ['nonce', (r) => r.nonce],
+      [
+        '내용',
+        (r) =>
+          r.sent
+            ? `${r.sent.amount} ${TOKENS[r.sent.tokenKey ?? 'testUSDT'].label} → ${addrChip(r.sent.to, { chain: r.pathway.dstKey })}`
+            : '<span class="muted">이 브라우저에서 보낸 전송이 아님</span>',
+      ],
+      ['판정', (r) => (r.verdict ? actionBadge(r.verdict.action) : '<span class="muted">기록 없음</span>')],
+      ['사유', (r) => (r.verdict ? reasonChips(decodeReasons(r.verdict.reason_mask)) : '—')],
+      [
+        '채널 상태',
+        (r) =>
+          r.committed
+            ? '<span class="badge warn">커밋됨 · 실행 대기</span>'
+            : r.blocking
+              ? '<span class="badge bad">검증 안 됨 · 이 자리가 막고 있음</span>'
+              : '<span class="badge muted">검증 안 됨</span>',
+      ],
+      ['Tx', (r) => (r.sent ? txLink(r.pathway.srcKey, r.sent.txHash) : '—')],
+      [
+        '',
+        // Only the blocking slot is rejectable, and that is the endpoint's rule rather than this
+        // page's: `skip` takes the head of the queue or nothing. A committed packet is past the
+        // point of refusal — it is verified and merely waiting to be executed.
+        (r) =>
+          r.committed
+            ? '<span class="muted">커밋됨 — 거절 불가</span>'
+            : r.blocking
+              ? `<button class="danger sm" data-skip="${r.nonce}" data-src="${r.pathway.srcKey}"
+                  data-dst="${r.pathway.dstKey}" data-token="${r.pathway.tokenKey}">거절</button>`
+              : '<span class="muted">앞 순서 먼저</span>',
+      ],
+    ],
+    '실행 대기 중인 nonce가 없습니다.',
+  )
+
+  $('#channels').innerHTML = table(rows, [
+    ['경로', (r) => `${CHAINS[r.srcKey].label} → ${CHAINS[r.dstKey].label}`],
+    ['토큰', (r) => TOKENS[r.tokenKey].label],
+    ['보낸 nonce', (r) => r.sent],
+    ['검증된 nonce', (r) => r.verified],
+    ['실행된 nonce', (r) => r.executed],
+    [
+      '상태',
+      (r) =>
+        r.stalledAt
+          ? `<span class="badge bad">nonce ${r.stalledAt}에서 막힘</span>`
+          : r.pending
+            ? `<span class="badge warn">실행 대기 ${r.pending}건</span>`
+            : '<span class="badge ok">정상</span>',
+    ],
+    [
+      '',
+      (r) =>
+        r.stalledAt
+          ? `<button class="danger sm" data-skip="${r.stalledAt}" data-src="${r.srcKey}"
+              data-dst="${r.dstKey}" data-token="${r.tokenKey}">nonce ${r.stalledAt} 거절</button>`
+          : '',
+    ],
+  ])
+
+  $$('[data-skip]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true
+      try {
+        if (!account) throw new Error('먼저 owner 지갑을 연결하세요')
+        setStatus($('#channel-status'), '지갑에서 승인하세요…', 'busy')
+        const hash = await skipNonce(b.dataset.src, b.dataset.dst, Number(b.dataset.skip), b.dataset.token)
+        setStatus(
+          $('#channel-status'),
+          `nonce ${b.dataset.skip} 거절 완료. ${txLink(b.dataset.dst, hash)} — 이 메시지는 영구히 배달될
+           수 없으며, 뒤에 밀려 있던 정상 메시지들은 다음 스캔에서 배달됩니다.`,
+          'ok',
+        )
+        loadChannels()
+        loadHolds()
+      } catch (e) {
+        setStatus($('#channel-status'), decodeRpcError(e), 'err')
+      } finally {
+        b.disabled = false
+      }
+    }
+  })
+}
+
+async function loadHolds() {
+  // Held packets live in the worker's local queue; approvals live on-chain via the indexer.
+  let pending = null
+  let workerError
+  try {
+    pending = (await workerApi('/pending')).pending
+  } catch (e) {
+    workerError = e.message
+  }
+
+  if (!pending) {
+    $('#holds').innerHTML = `<p class="status err">worker에 연결할 수 없습니다 (${workerError}).
+      보류 큐는 worker가 자체적으로 들고 있는 상태입니다 —
+      <span class="mono">cd worker &amp;&amp; pnpm start</span> 로 실행하거나, 아래에서 payload 해시로
+      직접 승인하세요.</p>`
+  } else if (!pending.length) {
+    $('#holds').innerHTML = '<p class="muted">보류 중인 패킷이 없습니다. DVN이 보류했던 건은 모두 처리되었습니다.</p>'
+  } else {
+    $('#holds').innerHTML = table(
+      pending,
+      [
+        ['판정', (r) => actionBadge(r.action) + (r.approved ? ' <span class="badge ok">승인됨</span>' : '')],
+        ['점수', (r) => r.score],
+        ['사유', (r) => reasonChips(r.reasonCodes)],
+        ['Payload', (r) => `<span class="mono" title="${r.payloadHash}">${short(r.payloadHash)}</span>`],
+        ['경로', (r) => `${CHAINS[r.srcChainKey]?.label ?? r.srcChainKey} → ${CHAINS[chainByEid[r.dstEid]]?.label ?? r.dstEid}`],
+        ['당사자', (r) => (r.parties ?? []).map((p) => addrChip(p.subject, { chain: p.chainKey })).join('<br>')],
+        ['보류 경과', (r) => fmtAgo(Date.now() - r.firstDeferredAt)],
+        ['재시도', (r) => r.attempts],
+        [
+          '',
+          (r, i) => {
+            const dstKey = chainByEid[r.dstEid]
+            if (!dstKey) return '<span class="muted">도착 체인 불명</span>'
+            const rejectBtn = `<button class="danger sm" data-reject="${i}" data-chain="${dstKey}">거절</button>`
+            // An approved packet still has a rejection available: until the worker releases it, the
+            // owner can change their mind, and skipping the nonce overrides the approval.
+            if (r.approved) return `<span class="muted">해제 대기</span> ${rejectBtn}`
+            return `<button class="sm" data-approve="${r.payloadHash}" data-chain="${dstKey}">승인</button> ${rejectBtn}`
+          },
+        ],
+      ],
+    )
+    $$('[data-approve]').forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true
+        try {
+          await approve(b.dataset.chain, b.dataset.approve, $('#status'))
+          loadHolds()
+          loadChannels()
+        } catch (e) {
+          setStatus($('#status'), decodeRpcError(e), 'err')
+        } finally {
+          b.disabled = false
+        }
+      }
+    })
+    // Indexed into the rendered list rather than carrying the 81-byte header through a data
+    // attribute, which would put the whole packet header in the DOM of every row.
+    $$('[data-reject]').forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true
+        try {
+          await reject(b.dataset.chain, pending[Number(b.dataset.reject)]?.header, $('#status'))
+          loadHolds()
+          loadChannels()
+        } catch (e) {
+          setStatus($('#status'), decodeRpcError(e), 'err')
+        } finally {
+          b.disabled = false
+        }
+      }
+    })
+  }
+
+  try {
+    const { approvals } = await indexerApi('/api/approvals?limit=50')
+    $('#approvals'). innerHTML = table(
+      approvals,
+      [
+        ['시각', (r) => fmtTime(r.block_time)],
+        ['체인', (r) => CHAINS[r.chain]?.label ?? r.chain],
+        ['Payload', (r) => `<span class="mono" title="${r.payload_hash}">${short(r.payload_hash)}</span>`],
+        ['승인자', (r) => addrChip(r.approver, { chain: r.chain })],
+        ['Tx', (r) => txLink(r.chain, r.tx_hash)],
+      ],
+      '아직 기록된 승인이 없습니다.',
+    )
+  } catch (e) {
+    $('#approvals').innerHTML = `<p class="status err">indexer에 연결할 수 없습니다 (${e.message})</p>`
+  }
+}
+
+/**
+ * Two cadences, because the two panels cost very different amounts.
+ *
+ * The hold queue and the approval log are local reads — the worker's own HTTP and the indexer — so
+ * they are polled fast enough that a hold appears, and a decision takes effect, while the operator
+ * is still looking at the row. The channel panel reads the endpoint over a public RPC, a dozen
+ * calls per pathway, so it runs slowly and is refreshed on demand after any action.
+ */
+const HOLDS_MS = 3000
+const CHANNELS_MS = 15000
+
+$('#refresh').onclick = () => {
+  loadHolds()
+  loadChannels()
+}
+loadHolds()
+loadChannels()
+setInterval(loadHolds, HOLDS_MS)
+setInterval(loadChannels, CHANNELS_MS)
+</script>
+</body>
+</html>

@@ -46,6 +46,69 @@ function make(opts: {
   return { mgr, metrics }
 }
 
+/**
+ * The feed refresh exists so a newly published graph label is usable in seconds. A full rebuild
+ * re-downloads OFAC and OpenSanctions, so it cannot run on that cadence.
+ */
+describe('DenylistManager feed refresh', () => {
+  it('ingests the feed into the store already in use', async () => {
+    const store = new RiskStore()
+    const refreshFeed = vi.fn(async (s: RiskStore) => {
+      s.upsert({ subject: '0x' + 'a'.repeat(40), labels: ['sanctions_1hop'], source: 'trusted_indexer' })
+      return 1
+    })
+    const m = new DenylistManager({
+      build: async () => ({ store, degraded: [] }),
+      refreshFeed,
+      refreshMs: 60_000,
+      maxStalenessMs: 120_000,
+      logger: silent,
+      metrics: createMetrics(),
+    })
+    await m.start()
+    expect(await m.refreshFeed()).toBe(1)
+    expect(refreshFeed).toHaveBeenCalledWith(store)
+    expect(store.has('0x' + 'a'.repeat(40))).toBe(true)
+    m.stop()
+  })
+
+  // Freshness is about the authoritative sources; a cheap feed fetch must not make a stale
+  // sanctions list look current.
+  it('does not reset the staleness clock', async () => {
+    let t = 1_000_000
+    const m = new DenylistManager({
+      build: async () => ({ store: new RiskStore(), degraded: [] }),
+      refreshFeed: async () => 1,
+      refreshMs: 60_000,
+      maxStalenessMs: 10_000,
+      now: () => t,
+      logger: silent,
+      metrics: createMetrics(),
+    })
+    await m.start()
+    expect(m.state).toBe('READY')
+    t += 20_000
+    await m.refreshFeed()
+    expect(m.evaluate()).toBe('HALTED') // still stale despite the feed refresh
+    m.stop()
+  })
+
+  it('survives a failing feed refresh without disturbing the store', async () => {
+    const m = new DenylistManager({
+      build: async () => ({ store: new RiskStore(), degraded: [] }),
+      refreshFeed: async () => { throw new Error('indexer down') },
+      refreshMs: 60_000,
+      maxStalenessMs: 120_000,
+      logger: silent,
+      metrics: createMetrics(),
+    })
+    await m.start()
+    expect(await m.refreshFeed()).toBe(0)
+    expect(m.state).toBe('READY')
+    m.stop()
+  })
+})
+
 describe('DenylistManager', () => {
   it('starts INITIALIZING and becomes READY after a successful build', async () => {
     const clock = fakeClock()

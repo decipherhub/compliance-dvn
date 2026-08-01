@@ -36,8 +36,11 @@ const deploy: DeployFunction = async (hre) => {
     const { address } = await deploy(contractName, {
         from: deployer,
         args: [
-            'MyOFT', // name
-            'MOFT', // symbol
+            // Demo token identity. 'testUSDT' upper-cases to TESTUSDT, which is deliberately NOT
+            // in the worker's WATCHED_STABLE_SYMBOLS — the demo token must not flag itself as a
+            // stablecoin impersonator.
+            'testUSDT', // name
+            'testUSDT', // symbol
             endpointV2Deployment.address, // LayerZero's EndpointV2 address
             deployer, // owner
         ],

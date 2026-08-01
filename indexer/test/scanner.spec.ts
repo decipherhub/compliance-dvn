@@ -3,11 +3,18 @@ import pino from 'pino'
 import { ethers } from 'ethers'
 import { scanChainOnce } from '../src/ingest/scanner'
 import { IngestStore } from '../src/ingest/store'
-import { dvnInterface, erc20Interface, type LogSource } from '../src/chain/events'
+import {
+  dvnInterface,
+  endpointInterface,
+  erc20Interface,
+  oftInterface,
+  decodePacketRecipient,
+  type LogSource,
+} from '../src/chain/events'
 import { applySchema, memDb } from './helpers/memdb'
 
 const silent = pino({ level: 'silent' })
-const CHAIN = { key: 'baseSepolia', dvn: '0x' + 'd'.repeat(40) }
+const CHAIN = { key: 'baseSepolia', dvn: '0x' + 'd'.repeat(40), endpoint: '0x' + 'f'.repeat(40) }
 const TOKEN = '0x' + 'e'.repeat(40)
 const A = '0x' + '1'.repeat(40)
 const B = '0x' + '2'.repeat(40)
@@ -181,6 +188,35 @@ describe('scanChainOnce', () => {
     expect(result.verdicts).toBe(1)
   })
 
+  // ERC-721 shares the Transfer topic but keeps all three parameters indexed, so its logs do
+  // not decode as ERC-20. Before this was handled, one NFT contract in TRACKED_TOKENS aborted
+  // the same chunk every tick — the cursor froze and never advanced again.
+  it('skips undecodable Transfer logs instead of freezing the cursor', async () => {
+    const chain = new FakeChain(100)
+    const erc721Transfer: ethers.providers.Log = {
+      blockNumber: 90,
+      blockHash: '0x',
+      transactionIndex: 0,
+      removed: false,
+      address: TOKEN,
+      data: '0x', // ERC-721: value lives in topics[3], not data
+      topics: [
+        erc20Interface.getEventTopic('Transfer'),
+        ethers.utils.hexZeroPad(A, 32),
+        ethers.utils.hexZeroPad(B, 32),
+        ethers.utils.hexZeroPad('0x01', 32), // tokenId
+      ],
+      transactionHash: '0x' + '7'.repeat(64),
+      logIndex: 0,
+    }
+    chain.logs = [erc721Transfer, transferLog(91, 0, '1000')]
+
+    const result = await scanChainOnce(deps(chain))
+    expect(result.transfers).toBe(1) // the real ERC-20 transfer still lands
+    expect(await store.getCursor(CHAIN.key)).toBe(95) // cursor advanced past the bad log
+    expect((await store.counts()).edges).toBe(1)
+  })
+
   describe('reorg handling', () => {
     it('rolls back and rescans when the stored hash no longer matches', async () => {
       const chain = new FakeChain(100)
@@ -248,5 +284,127 @@ describe('scanChainOnce', () => {
     chain.logs = [transferLog(90, 0, '1000')]
     const result = await scanChainOnce(deps(chain, { trackedTokens: [] }))
     expect(result.transfers).toBe(0)
+  })
+})
+
+/**
+ * Cross-chain sends.
+ *
+ * A bridged transfer is a burn here and a mint there, so the burn/mint pair alone says only that
+ * the supply moved — and when the DVN blocks the packet, the destination half never happens at all.
+ * The sender and the recipient are both knowable on this side: `OFTSent` names one, the packet the
+ * other, and the guid ties them together.
+ */
+describe('scanChainOnce: cross-chain sends', () => {
+  const DST_EID = 40232
+
+  /** `header(81) ‖ guid(32) ‖ message`, with the recipient as the message's opening word. */
+  function packet(guid: string, to: string): string {
+    const header = '01' + '00'.repeat(80)
+    const message = '00'.repeat(12) + to.slice(2) + '00'.repeat(8)
+    return '0x' + header + guid.slice(2) + message
+  }
+
+  function oftSentLog(blockNumber: number, logIndex: number, guid: string, from: string, value: string) {
+    const encoded = oftInterface.encodeEventLog(oftInterface.getEvent('OFTSent'), [
+      guid,
+      DST_EID,
+      from,
+      ethers.BigNumber.from(value),
+      ethers.BigNumber.from(value),
+    ])
+    return {
+      blockNumber, blockHash: '0x', transactionIndex: 0, removed: false, address: TOKEN,
+      data: encoded.data, topics: encoded.topics,
+      transactionHash: '0x' + String(700000 + blockNumber).padStart(64, '0'), logIndex,
+    } as ethers.providers.Log
+  }
+
+  function packetSentLog(blockNumber: number, logIndex: number, guid: string, to: string) {
+    const encoded = endpointInterface.encodeEventLog(endpointInterface.getEvent('PacketSent'), [
+      packet(guid, to), '0x', '0x' + '9'.repeat(40),
+    ])
+    return {
+      blockNumber, blockHash: '0x', transactionIndex: 0, removed: false, address: CHAIN.endpoint,
+      data: encoded.data, topics: encoded.topics,
+      transactionHash: '0x' + String(700000 + blockNumber).padStart(64, '0'), logIndex,
+    } as ethers.providers.Log
+  }
+
+  const guid = (n: number) => '0x' + String(n).padStart(64, '0')
+
+  it('records the real counterparties as a bridge edge', async () => {
+    const chain = new FakeChain(100)
+    chain.logs = [oftSentLog(90, 0, guid(1), A, '5000'), packetSentLog(90, 1, guid(1), B)]
+    const result = await scanChainOnce(deps(chain, { chainByEid: () => 'optimismSepolia' }))
+
+    expect(result.bridgeSends).toBe(1)
+    const { rows } = await db.query<{ from_addr: string; to_addr: string; value: string; kind: string; dst_chain: string }>(
+      'SELECT from_addr, to_addr, value, kind, dst_chain FROM edges',
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].from_addr).toBe(A.toLowerCase())
+    expect(rows[0].to_addr).toBe(B.toLowerCase())
+    expect(String(rows[0].value)).toBe('5000')
+    expect(rows[0].kind).toBe('bridge')
+    expect(rows[0].dst_chain).toBe('optimismSepolia')
+  })
+
+  // The burn is a separate log in the same transaction, so both must land without colliding on the
+  // (chain, tx_hash, log_index) key.
+  it('keeps the burn and the bridge edge as separate rows', async () => {
+    const chain = new FakeChain(100)
+    const burn = { ...transferLog(90, 2, '5000'), transactionHash: '0x' + String(700090).padStart(64, '0') }
+    chain.logs = [oftSentLog(90, 0, guid(1), A, '5000'), packetSentLog(90, 1, guid(1), B), burn]
+    const result = await scanChainOnce(deps(chain))
+    expect(result.transfers).toBe(1)
+    expect(result.bridgeSends).toBe(1)
+    const { rows } = await db.query<{ kind: string }>('SELECT kind FROM edges ORDER BY log_index')
+    expect(rows.map((r) => r.kind)).toEqual(['bridge', 'transfer'])
+  })
+
+  // Two sends in one transaction share a tx hash, so the guid — not the transaction — has to be
+  // what pairs a send with its recipient.
+  it('pairs batched sends by guid rather than by transaction', async () => {
+    const chain = new FakeChain(100)
+    const C = '0x' + '3'.repeat(40)
+    chain.logs = [
+      oftSentLog(90, 0, guid(1), A, '100'),
+      oftSentLog(90, 1, guid(2), A, '200'),
+      packetSentLog(90, 2, guid(2), C),
+      packetSentLog(90, 3, guid(1), B),
+    ]
+    await scanChainOnce(deps(chain))
+    const { rows } = await db.query<{ to_addr: string; value: string }>(
+      "SELECT to_addr, value FROM edges WHERE kind = 'bridge' ORDER BY value",
+    )
+    expect(rows.map((r) => [r.to_addr, String(r.value)])).toEqual([
+      [B.toLowerCase(), '100'],
+      [C.toLowerCase(), '200'],
+    ])
+  })
+
+  it('skips a send whose recipient cannot be read rather than guessing one', async () => {
+    const chain = new FakeChain(100)
+    chain.logs = [oftSentLog(90, 0, guid(1), A, '5000')] // no PacketSent
+    const result = await scanChainOnce(deps(chain))
+    expect(result.bridgeSends).toBe(0)
+    expect((await db.query('SELECT 1 FROM edges')).rowCount).toBe(0)
+  })
+
+  it('records the edge even when the destination chain is not indexed here', async () => {
+    const chain = new FakeChain(100)
+    chain.logs = [oftSentLog(90, 0, guid(1), A, '5000'), packetSentLog(90, 1, guid(1), B)]
+    await scanChainOnce(deps(chain, { chainByEid: () => undefined }))
+    const { rows } = await db.query<{ dst_chain: string | null }>("SELECT dst_chain FROM edges WHERE kind = 'bridge'")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].dst_chain).toBeNull()
+  })
+
+  it('reads the recipient from the message, not from the guid that precedes it', () => {
+    const decoded = decodePacketRecipient(packet(guid(7), B))
+    expect(decoded?.guid).toBe(guid(7))
+    expect(decoded?.to).toBe(B.toLowerCase())
+    expect(decodePacketRecipient('0x1234')).toBeUndefined()
   })
 })

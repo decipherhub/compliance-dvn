@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compliance DVN — 전송</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Compliance DVN</h1>
+  <nav id="nav"></nav>
+  <div id="health"></div>
+</header>
+
+<main>
+  <div class="grid two">
+    <!-- ── cross-chain send ─────────────────────────────────────────────── -->
+    <section class="card">
+      <h2>크로스체인 전송 (OFT)<span id="help-send"></span></h2>
+
+      <!-- Same rhythm as the panel beside it: h2, then h3-titled blocks. -->
+      <h3>지갑</h3>
+      <div id="wallet-row">
+        <button id="connect">지갑 연결</button>
+      </div>
+
+      <h3 style="margin-top:20px">전송 내용</h3>
+      <div class="grid three">
+        <div class="field">
+          <label for="src">출발</label>
+          <select id="src"></select>
+        </div>
+        <div class="field">
+          <label for="dst">도착</label>
+          <select id="dst"></select>
+        </div>
+        <div class="field">
+          <label for="token">토큰</label>
+          <select id="token"></select>
+        </div>
+        <div class="field">
+          <label for="amount">수량</label>
+          <input id="amount" value="1" inputmode="decimal">
+        </div>
+      </div>
+
+      <label for="to">수취인 (도착 체인 기준)</label>
+      <input id="to" class="mono" placeholder="0x…">
+      <div class="row" style="margin-top:7px">
+        <button class="ghost sm" data-fill="0x25D10657a2642Fe8cd6bEe501dBd0939d79bD90F">정상 지갑 (A)</button>
+        <button class="ghost sm" data-fill="0x000000000000000000000000000000000000dEaD">차단 목록 (S)</button>
+        <button class="ghost sm" data-fill="0x9a1c282ebA5e9A97290cAc530902Fb00dcf2ECe2">1홉 지갑 (B)</button>
+        <button class="ghost sm" id="fill-proxy">위험 프록시</button>
+        <button class="ghost sm" id="fill-self">내 주소</button>
+      </div>
+
+      <div class="row" style="margin-top:14px">
+        <button id="quote" class="ghost">수수료 견적</button>
+        <button id="send">전송</button>
+      </div>
+      <div id="send-status" class="status"></div>
+    </section>
+
+    <!-- ── faucet + same-chain transfer ─────────────────────────────────── -->
+    <section class="card">
+      <h2>토큰 도구<span id="help-tools"></span></h2>
+
+      <h3>토큰 발행 (Faucet)</h3>
+      <div class="row">
+        <input id="faucet-amount" value="100" style="max-width:120px">
+        <button id="faucet" class="ghost">내 지갑으로 발행</button>
+      </div>
+
+      <h3 style="margin-top:20px">같은 체인 내 전송</h3>
+      <label for="xfer-to">수취인</label>
+      <input id="xfer-to" class="mono" placeholder="0x…">
+      <div class="row" style="margin-top:7px">
+        <button class="ghost sm" data-fill-xfer="0x0330070fd38ec3bb94f58fa55d40368271e9e54a">OFAC 시드 (X)</button>
+        <button class="ghost sm" data-fill-xfer="0x9a1c282ebA5e9A97290cAc530902Fb00dcf2ECe2">1홉 지갑 (B)</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <input id="xfer-amount" value="0.1" style="max-width:120px">
+        <button id="xfer" class="ghost">전송</button>
+      </div>
+      <div id="xfer-status" class="status"></div>
+    </section>
+  </div>
+
+  <!-- ── packet tracker ─────────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="row">
+      <h2 style="margin:0">내 패킷<span id="help-track"></span></h2>
+      <span class="spacer"></span>
+      <span class="muted" id="track-note"></span>
+      <button class="ghost sm" id="track-refresh">새로고침</button>
+      <button class="ghost sm" id="track-clear">목록 지우기</button>
+    </div>
+    <div id="track" class="track"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="lib.js"></script>
+<script>
+mountHeader('index.html')
+
+// SENT_KEY / loadSent / saveSent live in lib.js: the overview page reads the same store to link a
+// verdict back to the send that produced it.
+
+$('#help-send').innerHTML = helpMark(`
+  <p>출발 체인에서 토큰을 소각하고 도착 체인에서 발행합니다 — 단, 우리 DVN이 해당 패킷을 검증해 준
+     경우에만입니다.</p>
+  <p>수수료는 지갑이 내고, 통과 여부는 DVN이 결정합니다.</p>
+  <p><b>토큰</b>을 <span class="mono">가짜 USDC</span>로 바꾸면 사칭 검사가 발화합니다 — 사칭 검사는
+     <b>전송되는 토큰</b>을 보므로, 미끼로 보내는 것이 아니라 미끼를 보내야 합니다.</p>`)
+$('#help-tools').innerHTML = helpMark(`
+  <p>두 토큰 모두 <span class="mono">mint()</span>가 열려 있습니다 — 테스트넷 전용입니다. 발행·전송은
+     위에서 선택한 토큰에 적용됩니다.</p>
+  <p>리스크 그래프를 만드는 것은 같은 체인 내 전송입니다: indexer가 읽는 대상이 그것입니다.</p>
+  <p>제재 주소로 보내면 해당 지갑에 <span class="mono">sanctions_1hop</span> 라벨이 붙습니다. 설정된
+     최소값(0.01) 이상으로 보내면 그 엣지를 경유해 경로가 한 홉 더 이어지고, 그것이 2홉 라벨이 생기는
+     방식입니다.</p>`)
+$('#help-track').innerHTML = helpMark(`
+  <p>차단된 패킷은 배달도 오류도 발생시키지 않습니다 — 아무 일도 일어나지 않는 것이 곧 집행입니다.</p>
+  <p>이 추적기가 그것을 눈에 보이게 만듭니다. LayerZero Scan 링크로 해당 메시지가 검증되지 않은 채
+     멈춰 있는 것을 직접 확인할 수 있습니다.</p>`)
+
+for (const [key, c] of Object.entries(CHAINS)) {
+  $('#src').insertAdjacentHTML('beforeend', `<option value="${key}">${c.label}</option>`)
+  $('#dst').insertAdjacentHTML('beforeend', `<option value="${key}">${c.label}</option>`)
+}
+$('#src').value = 'baseSepolia'
+$('#dst').value = 'optimismSepolia'
+
+for (const [key, t] of Object.entries(TOKENS)) {
+  $('#token').insertAdjacentHTML('beforeend', `<option value="${key}">${t.label}</option>`)
+}
+/** Which token the send, the faucet and the same-chain transfer all operate on. */
+const selectedToken = () => $('#token').value
+
+$('#token').onchange = refreshBalance
+
+// Source and destination must differ; flip the other select rather than erroring at send time.
+// The balance follows the source chain through the `change` listener registered further down.
+$('#src').onchange = () => { if ($('#dst').value === $('#src').value) $('#dst').value = otherChain($('#src').value) }
+$('#dst').onchange = () => { if ($('#dst').value === $('#src').value) $('#src').value = otherChain($('#dst').value) }
+const otherChain = (k) => Object.keys(CHAINS).find((x) => x !== k)
+
+$$('[data-fill]').forEach((b) => (b.onclick = () => ($('#to').value = b.dataset.fill)))
+$$('[data-fill-xfer]').forEach((b) => (b.onclick = () => ($('#xfer-to').value = b.dataset.fillXfer)))
+
+let account
+let connectedWallet = ''
+
+/**
+ * The wallet row is one line in either state: a button to connect, or the connection itself.
+ *
+ * Leaving the button in place after connecting invited a second click that does nothing, and the
+ * address sat beside it with no indication that it was the result. Connected, the row states the
+ * wallet, the account, and the balance on the selected source chain — the three things the send
+ * below depends on.
+ */
+function renderWallet(balanceText) {
+  const row = $('#wallet-row')
+  if (!account) {
+    row.innerHTML = '<button id="connect">지갑 연결</button>'
+    $('#connect').onclick = doConnect
+    return
+  }
+  // Two lines: who is signing, then what they hold. The balance is per chain, so it names one.
+  row.innerHTML = `
+    <div class="wallet">
+      <div class="row">
+        <span class="mono" title="${account}">${account}</span>
+        <span class="lamp" title="${connectedWallet} 연결됨"><i class="dot ok"></i>${connectedWallet}</span>
+      </div>
+      <div class="muted" id="balance">${balanceText ?? '잔액 조회 중…'}</div>
+    </div>`
+}
+
+async function doConnect() {
+  try {
+    const { address, wallet } = await connect()
+    account = address
+    connectedWallet = wallet
+    if (!$('#to').value) $('#to').value = address
+    renderWallet()
+    refreshBalance()
+    // Follow the wallet: switching account or network in MetaMask must not leave a stale address.
+    onWalletChange(({ accounts }) => {
+      if (accounts && accounts.length === 0) {
+        account = ''
+        connectedWallet = ''
+        renderWallet()
+        setStatus($('#send-status'), '지갑 연결이 해제되었습니다.', 'err')
+        return
+      }
+      if (accounts && accounts[0]) account = accounts[0]
+      renderWallet()
+      refreshBalance()
+    })
+  } catch (e) {
+    setStatus($('#send-status'), e.message, 'err')
+  }
+}
+$('#connect').onclick = doConnect
+
+$('#fill-self').onclick = () => { if (account) $('#to').value = account }
+// The recipient is screened against the destination chain, so which proxy to use follows 도착.
+$('#fill-proxy').onclick = () => { $('#to').value = CFG.riskyProxy[$('#dst').value] ?? '' }
+// The decoy is screened on the destination chain, so which one to use follows the 도착 select.
+
+async function refreshBalance() {
+  if (!account) return
+  const key = $('#src').value
+  const token = new ethers.Contract(tokenAt(selectedToken(), key), ERC20_ABI, readProvider(key))
+  const bal = await token.balanceOf(account)
+  renderWallet(`${TOKENS[selectedToken()].label} 잔액 ${fmtUnits(bal.toString())} · ${CHAINS[key].label}`)
+}
+$('#src').addEventListener('change', refreshBalance)
+
+/**
+ * Executor options: gas to run `lzReceive` on the destination.
+ *
+ * The pathway has no enforced options wired, so every send must carry its own — an empty blob is
+ * rejected by the send library as `LZ_ULN_InvalidWorkerOptions(0)`. Built by hand rather than
+ * pulling in the LayerZero options builder, since the encoding is fixed and short:
+ *
+ *   0003            options type 3
+ *   01              worker id: executor
+ *   0011            length of what follows (1 byte option type + 16 byte gas)
+ *   01              option type: lzReceive
+ *   <uint128 gas>
+ *
+ * Verified byte-for-byte against `Options.newOptions().addExecutorLzReceiveOption(gas, 0)`, which
+ * is what the CLI send path uses.
+ */
+const LZ_RECEIVE_GAS = 200000
+
+function executorOptions(gas = LZ_RECEIVE_GAS) {
+  const gas128 = ethers.utils.hexZeroPad(ethers.BigNumber.from(gas).toHexString(), 16).slice(2)
+  return '0x0003' + '01' + '0011' + '01' + gas128
+}
+
+/** Build the OFT SendParam. */
+function sendParam(dstKey, to, amount) {
+  return {
+    dstEid: CHAINS[dstKey].eid,
+    to: ethers.utils.hexZeroPad(to, 32),
+    amountLD: ethers.utils.parseEther(amount),
+    minAmountLD: ethers.utils.parseEther(amount),
+    extraOptions: executorOptions(),
+    composeMsg: '0x',
+    oftCmd: '0x',
+  }
+}
+
+function validateSend() {
+  const to = $('#to').value.trim()
+  if (!ethers.utils.isAddress(to)) throw new Error('수취인 주소 형식이 올바르지 않습니다')
+  const amount = $('#amount').value.trim()
+  if (!(Number(amount) > 0)) throw new Error('수량은 0보다 커야 합니다')
+  if ($('#src').value === $('#dst').value) throw new Error('출발 체인과 도착 체인이 같습니다')
+  return { to, amount, srcKey: $('#src').value, dstKey: $('#dst').value }
+}
+
+$('#quote').onclick = async () => {
+  try {
+    const { to, amount, srcKey, dstKey } = validateSend()
+    setStatus($('#send-status'), '견적 조회 중…', 'busy')
+    const oft = new ethers.Contract(tokenAt(selectedToken(), srcKey), OFT_ABI, readProvider(srcKey))
+    const fee = await oft.quoteSend(sendParam(dstKey, to, amount), false)
+    setStatus($('#send-status'), `LayerZero 수수료: <b>${fmtUnits(fee.nativeFee.toString())} ETH</b> (DVN + executor)`, 'ok')
+  } catch (e) {
+    setStatus($('#send-status'), decodeRpcError(e), 'err')
+  }
+}
+
+$('#send').onclick = async () => {
+  const btn = $('#send')
+  try {
+    const { to, amount, srcKey, dstKey } = validateSend()
+    if (!account) throw new Error('먼저 지갑을 연결하세요')
+    btn.disabled = true
+    setStatus($('#send-status'), '네트워크 전환 중…', 'busy')
+    await ensureChain(srcKey)
+
+    const oft = new ethers.Contract(tokenAt(selectedToken(), srcKey), OFT_ABI, signer())
+    const param = sendParam(dstKey, to, amount)
+    setStatus($('#send-status'), '수수료 견적 중…', 'busy')
+    const fee = await oft.quoteSend(param, false)
+
+    // Exactly the quoted fee, never more: OAppSender._payNative reverts unless
+    // `msg.value == nativeFee`, so a "safety buffer" here is itself a revert.
+    const value = fee.nativeFee
+
+    // Estimate against the node first: a revert here still carries its selector, whereas the same
+    // failure inside the wallet's send arrives as a bare "Internal JSON-RPC error".
+    setStatus($('#send-status'), '트랜잭션 확인 중…', 'busy')
+    const gasLimit = await oft.estimateGas.send(param, fee, account, { value })
+
+    setStatus($('#send-status'), '지갑에서 승인하세요…', 'busy')
+    const tx = await oft.send(param, fee, account, { value, gasLimit: gasLimit.mul(120).div(100) })
+    setStatus($('#send-status'), `전송됨 — 컨펌 대기 중… ${txLink(srcKey, tx.hash)}`, 'busy')
+    const receipt = await tx.wait()
+
+    const { payloadHash, guid, nonce } = extractPacketIds(receipt)
+    const record = {
+      txHash: tx.hash,
+      srcKey,
+      dstKey,
+      to,
+      amount,
+      tokenKey: selectedToken(),
+      payloadHash,
+      guid,
+      nonce,
+      at: Date.now(),
+    }
+    saveSent([record, ...loadSent()])
+    setStatus(
+      $('#send-status'),
+      `패킷이 발행되었습니다. ${txLink(srcKey, tx.hash)} — DVN이 다음 스캔에서 심사합니다.
+       아래 "내 패킷"에서 확인하세요.`,
+      'ok',
+    )
+    trackLoop() // straight onto the fast cadence — this packet is the one being watched
+    refreshBalance()
+  } catch (e) {
+    setStatus($('#send-status'), decodeRpcError(e), 'err')
+  } finally {
+    btn.disabled = false
+  }
+}
+
+/**
+ * Recover the packet's payloadHash from the send receipt.
+ *
+ * PacketSent carries the whole encoded packet; the payload is everything after the 81-byte
+ * header, and its keccak256 is what every downstream verdict is keyed by. Doing this here means
+ * the tracker can follow a packet without asking the worker what it saw.
+ */
+const PACKET_SENT_TOPIC = ethers.utils.id('PacketSent(bytes,bytes,address)')
+function extractPacketIds(receipt) {
+  for (const log of receipt.logs) {
+    if (log.topics[0] !== PACKET_SENT_TOPIC) continue
+    const [encoded] = ethers.utils.defaultAbiCoder.decode(['bytes', 'bytes', 'address'], log.data)
+    const hex = encoded.slice(2)
+    return {
+      payloadHash: ethers.utils.keccak256('0x' + hex.slice(81 * 2)),
+      // header(81) ‖ guid(32) ‖ message — the guid is how the destination reports the receipt.
+      guid: '0x' + hex.slice(81 * 2, (81 + 32) * 2),
+      // header = version(1) ‖ nonce(8) ‖ srcEid(4) ‖ sender(32) ‖ dstEid(4) ‖ receiver(32).
+      // The nonce is what the destination channel orders messages by, so it is what a stalled
+      // channel has to be explained in terms of.
+      nonce: Number(BigInt('0x' + hex.slice(2, 18))),
+    }
+  }
+  return {}
+}
+
+/**
+ * Has the destination actually credited the recipient?
+ *
+ * A verdict of allow plus a driven commit means the DVN did its part — it does NOT mean the message
+ * was executed. `lzReceive` is the executor's job, and until it runs the tokens do not exist on the
+ * destination. Asking the destination OFT for its own `OFTReceived` event, keyed by guid, is the
+ * only answer that cannot overstate the outcome.
+ */
+const OFT_RECEIVED_TOPIC = ethers.utils.id('OFTReceived(bytes32,uint32,address,uint256)')
+async function deliveredOnDestination(dstKey, guid, tokenKey) {
+  if (!guid) return undefined
+  try {
+    const provider = readProvider(dstKey)
+    const head = await provider.getBlockNumber()
+    const logs = await provider.getLogs({
+      address: tokenAt(tokenKey, dstKey),
+      topics: [OFT_RECEIVED_TOPIC, guid],
+      // 9,000 blocks — the public RPCs reject 10,000 or more as "Block range is too large", and at
+      // ~2s per block this still reaches back about five hours, well past any demo session.
+      fromBlock: Math.max(0, head - 9000),
+      toBlock: head,
+    })
+    return logs.length > 0
+  } catch {
+    return undefined // cannot tell — reported as such rather than assumed either way
+  }
+}
+
+$('#faucet').onclick = async () => {
+  try {
+    if (!account) throw new Error('먼저 지갑을 연결하세요')
+    const srcKey = $('#src').value
+    await ensureChain(srcKey)
+    const token = new ethers.Contract(tokenAt(selectedToken(), srcKey), ERC20_ABI, signer())
+    setStatus($('#xfer-status'), '지갑에서 승인하세요…', 'busy')
+    const tx = await token.mint(account, ethers.utils.parseEther($('#faucet-amount').value.trim()))
+    await tx.wait()
+    setStatus($('#xfer-status'), `발행 완료. ${txLink(srcKey, tx.hash)}`, 'ok')
+    refreshBalance()
+  } catch (e) {
+    setStatus($('#xfer-status'), decodeRpcError(e), 'err')
+  }
+}
+
+$('#xfer').onclick = async () => {
+  try {
+    if (!account) throw new Error('먼저 지갑을 연결하세요')
+    const to = $('#xfer-to').value.trim()
+    if (!ethers.utils.isAddress(to)) throw new Error('수취인 주소 형식이 올바르지 않습니다')
+    const srcKey = $('#src').value
+    await ensureChain(srcKey)
+    const token = new ethers.Contract(tokenAt(selectedToken(), srcKey), ERC20_ABI, signer())
+    setStatus($('#xfer-status'), '지갑에서 승인하세요…', 'busy')
+    const tx = await token.transfer(to, ethers.utils.parseEther($('#xfer-amount').value.trim()))
+    await tx.wait()
+    setStatus(
+      $('#xfer-status'),
+      `전송 완료. ${txLink(srcKey, tx.hash)} — indexer가 약 15초 내에 엣지를 수집하고, 라벨은 다음
+       피드 빌드에 반영됩니다.`,
+      'ok',
+    )
+    refreshBalance()
+  } catch (e) {
+    setStatus($('#xfer-status'), decodeRpcError(e), 'err')
+  }
+}
+
+$('#track-clear').onclick = () => { localStorage.removeItem(SENT_KEY); trackLoop() }
+$('#track-refresh').onclick = () => trackLoop()
+
+/**
+ * Resolve each remembered send into a state.
+ *
+ * Two independent facts, deliberately kept apart: the DVN's verdict (from the indexer, which
+ * collects RiskVerdict events) and whether the destination actually credited the recipient (its own
+ * OFTReceived event). An allowed packet is only "verified" until the executor runs `lzReceive` —
+ * calling that "delivered" claimed something the chain had not yet done.
+ */
+async function renderTracker() {
+  const sent = loadSent()
+  if (!sent.length) {
+    $('#track').innerHTML = '<p class="muted">이 브라우저에서 보낸 전송이 아직 없습니다.</p>'
+    $('#track-note').textContent = ''
+    return 0
+  }
+
+  let verdicts = []
+  let indexerUp = true
+  try {
+    verdicts = (await indexerApi('/api/verdicts?limit=500')).verdicts
+  } catch {
+    indexerUp = false
+  }
+  $('#track-note').textContent = indexerUp ? '' : 'indexer 중지 — 판정을 조회할 수 없습니다'
+
+  const byHash = new Map()
+  for (const v of verdicts) {
+    // Newest first from the API, so the first entry per hash is the latest verdict.
+    if (!byHash.has(v.payload_hash)) byHash.set(v.payload_hash, v)
+  }
+
+  // Delivery is a separate question from the verdict, and only worth asking once one allows it.
+  // Once seen it is remembered: delivery never un-happens, so re-scanning 9,000 blocks for a packet
+  // already known to have landed would only slow every later poll down.
+  const delivered = new Map()
+  let learned = false
+  await Promise.all(
+    sent.map(async (s) => {
+      if (s.deliveredAt) return delivered.set(s.txHash, true)
+      const v = s.payloadHash ? byHash.get(s.payloadHash.toLowerCase()) : undefined
+      if (!v || v.action !== 0) return
+      const arrived = await deliveredOnDestination(s.dstKey, s.guid, s.tokenKey ?? 'testUSDT')
+      delivered.set(s.txHash, arrived)
+      if (arrived) {
+        s.deliveredAt = Date.now()
+        learned = true
+      }
+    }),
+  )
+  // Merged into a re-read rather than saving this render's snapshot: a send that landed while the
+  // delivery checks were in flight is already in storage, and writing the snapshot would drop it.
+  if (learned) {
+    const stamps = new Map(sent.filter((s) => s.deliveredAt).map((s) => [s.txHash, s.deliveredAt]))
+    const fresh = loadSent()
+    for (const r of fresh) r.deliveredAt ??= stamps.get(r.txHash)
+    saveSent(fresh)
+  }
+
+  let moving = 0
+  $('#track').innerHTML = sent
+    .map((s) => {
+      const v = s.payloadHash ? byHash.get(s.payloadHash.toLowerCase()) : undefined
+      const reasons = v ? decodeReasons(v.reason_mask) : []
+      const arrived = delivered.get(s.txHash)
+      // The badge, the action, the score and the reason chips already say what happened; a sentence
+      // restating them read as filler on every row.
+      let state, kind
+      if (arrived) {
+        // Checked before the verdict: the destination crediting the recipient is the stronger fact,
+        // and it is remembered locally, so an indexer outage must not walk this back to "심사 중".
+        state = '배달 완료'
+        kind = 'ok'
+      } else if (!v) {
+        state = '심사 중'
+        kind = ''
+      } else if (v.action === 3) {
+        state = '차단됨'
+        kind = 'bad'
+      } else if (v.action === 2) {
+        state = '보류 — owner 승인 대기'
+        kind = 'hold'
+      } else if (v.action === 1) {
+        state = '보류 — 지연'
+        kind = 'hold'
+      } else {
+        // Allowed and committed; running lzReceive is a separate step from the verdict.
+        state = arrived === false ? '검증 완료 — 배달 대기' : '검증 완료 — 배달 확인 불가'
+        kind = 'warn'
+      }
+
+      // A blocked packet is finished and a delivered one cannot change; everything else is still
+      // moving, so the loop below keeps polling. Old rows stop counting so a hold left overnight
+      // does not pin the page to the fast cadence forever.
+      const settled = (v && v.action === 3) || arrived === true
+      if (!settled && Date.now() - s.at < 10 * 60_000) moving++
+
+      const steps = [
+        ['전송', true],
+        ['심사', !!v || arrived === true],
+        [v && v.action === 3 ? '거부' : arrived || (v && v.action === 0) ? '검증' : '보류', !!v || arrived === true],
+        ['배달', arrived === true],
+      ]
+
+      return `<div class="track-item ${kind}">
+        <div class="track-head">
+          <span class="badge ${kind || 'muted'}">${state}</span>
+          ${v ? actionBadge(v.action) : ''}
+          ${v ? `<span class="muted">점수 ${v.score}</span>` : ''}
+          <span class="muted">${CHAINS[s.srcKey].label} → ${CHAINS[s.dstKey].label}</span>
+          <span class="muted">${s.amount} ${TOKENS[s.tokenKey ?? 'testUSDT'].label} → ${addrChip(s.to, { chain: s.dstKey })}</span>
+          <span class="spacer"></span>
+          <span class="muted">${fmtAgo(Date.now() - s.at)}</span>
+        </div>
+        <div class="steps">
+          ${steps.map(([l, done], i) => `${i ? '<span class="sep">→</span>' : ''}<span class="step ${done ? 'done' : ''}">${l}</span>`).join(' ')}
+        </div>
+        <div class="steps">${reasons.length ? reasonChips(reasons) : ''}</div>
+        <div class="steps">
+          <span>출발 tx ${txLink(s.srcKey, s.txHash)}</span>
+          <span class="sep">·</span><span>${lzLink(s.txHash)}</span>
+          ${s.payloadHash ? `<span class="sep">·</span><span>payload <span class="mono" title="${s.payloadHash}">${short(s.payloadHash)}</span></span>` : ''}
+          ${v ? `<span class="sep">·</span><span>판정 tx ${txLink(v.chain, v.tx_hash)}</span>` : ''}
+        </div>
+      </div>`
+    })
+    .join('')
+  return moving
+}
+
+/**
+ * Poll fast while something is in flight, slowly once nothing is.
+ *
+ * A fixed interval had to be long enough not to hammer the RPCs at rest, which meant a packet the
+ * chain had already credited sat on screen as "배달 대기" for most of that interval. Every step the
+ * page reports — verdict, then delivery — is a poll away, so the cadence follows whether any
+ * remembered send is still moving.
+ */
+const TRACK_FAST_MS = 2500
+const TRACK_IDLE_MS = 20000
+let trackTimer
+async function trackLoop() {
+  clearTimeout(trackTimer)
+  let moving = 0
+  try {
+    moving = await renderTracker()
+  } catch (e) {
+    $('#track-note').textContent = `추적 갱신 실패: ${e.message}`
+  }
+  trackTimer = setTimeout(trackLoop, moving ? TRACK_FAST_MS : TRACK_IDLE_MS)
+}
+trackLoop()
+</script>
+</body>
+</html>

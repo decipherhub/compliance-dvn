@@ -1,13 +1,19 @@
 import type { Logger } from 'pino'
-import type { LogSource, PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
-import { scanDvnEvents, scanTransfers } from '../chain/events'
+import type { BridgeSendRow, LogSource, PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
+import { scanBridgeSends, scanDvnEvents, scanTransfers } from '../chain/events'
 import type { IngestStore } from './store'
 
 export interface ScanChainDeps {
-  chain: { key: string; dvn: string }
+  chain: { key: string; dvn: string; endpoint: string }
   source: LogSource
   store: IngestStore
   trackedTokens: readonly string[]
+  /**
+   * LayerZero eid -> chain key, for naming where a cross-chain send was addressed. A destination
+   * this deployment does not index resolves to undefined, and the edge is still recorded — the
+   * sender's act is the evidence, and it happened here.
+   */
+  chainByEid?: (eid: number) => string | undefined
   confirmations: number
   /** How far back to start on a cold cursor. */
   scanWindow: number
@@ -24,6 +30,7 @@ export interface ScanResult {
   verdicts: number
   approvals: number
   transfers: number
+  bridgeSends: number
   reorgDepth: number
   /** Chain head as observed this tick — the only place it is read, and scan lag needs it. */
   head: number
@@ -100,42 +107,66 @@ export async function scanChainOnce(deps: ScanChainDeps): Promise<ScanResult> {
     }
   }
 
-  const result: ScanResult = { from: cursor + 1, to: cursor, verdicts: 0, approvals: 0, transfers: 0, reorgDepth: reorgUnwound, head }
+  const result: ScanResult = { from: cursor + 1, to: cursor, verdicts: 0, approvals: 0, transfers: 0, bridgeSends: 0, reorgDepth: reorgUnwound, head }
   if (safeHead <= cursor) return result
 
   while (cursor < safeHead) {
     const from = cursor + 1
     const to = Math.min(from + deps.scanChunk - 1, safeHead)
 
-    const [{ verdicts, approvals }, transfers] = await Promise.all([
+    const skipped = new Map<string, number>()
+    const unpaired: string[] = []
+    const [{ verdicts, approvals }, transfers, sends] = await Promise.all([
       scanDvnEvents(source, chain.dvn, from, to),
-      scanTransfers(source, deps.trackedTokens, from, to),
+      scanTransfers(source, deps.trackedTokens, from, to, (token) =>
+        skipped.set(token, (skipped.get(token) ?? 0) + 1),
+      ),
+      scanBridgeSends(source, deps.trackedTokens, chain.endpoint, from, to, (guid) => unpaired.push(guid)),
     ])
+    const bridgeSends = sends.map((s) => ({ ...s, dstChain: deps.chainByEid?.(s.dstEid) }))
+    if (unpaired.length) {
+      // Loud, because a send whose recipient could not be read is a missing edge, not a missing row.
+      log.warn({ from, to, unpaired }, 'cross-chain sends with no readable packet — recipient unknown, edge skipped')
+    }
+    if (skipped.size) {
+      log.warn(
+        { from, to, skipped: Object.fromEntries(skipped) },
+        'skipped undecodable Transfer logs — is every TRACKED_TOKENS entry an ERC-20?',
+      )
+    }
 
     // Record identity only for blocks we actually touched — enough for the reorg check at the
     // cursor without storing every empty block on the chain.
-    const heights = new Set<number>([to, ...verdicts.map((v) => v.blockNumber), ...approvals.map((a) => a.blockNumber), ...transfers.map((t) => t.blockNumber)])
+    const heights = new Set<number>([to, ...verdicts.map((v) => v.blockNumber), ...approvals.map((a) => a.blockNumber), ...transfers.map((t) => t.blockNumber), ...bridgeSends.map((b) => b.blockNumber)])
     const blocks: Array<{ number: number; hash: string; parentHash: string; timestamp: number }> = []
     for (const number of heights) {
       const block = await source.getBlock(number)
       if (block) blocks.push({ number, hash: block.hash, parentHash: block.parentHash, timestamp: block.timestamp })
     }
 
-    await store.commitRange(chain.key, to, { verdicts, approvals, transfers, blocks })
+    await store.commitRange(chain.key, to, { verdicts, approvals, transfers, bridgeSends, blocks })
     result.verdicts += verdicts.length
     result.approvals += approvals.length
     result.transfers += transfers.length
+    result.bridgeSends += bridgeSends.length
     result.to = to
     cursor = to
   }
 
-  if (result.verdicts || result.approvals || result.transfers) {
+  if (result.verdicts || result.approvals || result.transfers || result.bridgeSends) {
     log.info(
-      { from: result.from, to: result.to, verdicts: result.verdicts, approvals: result.approvals, transfers: result.transfers },
+      {
+        from: result.from,
+        to: result.to,
+        verdicts: result.verdicts,
+        approvals: result.approvals,
+        transfers: result.transfers,
+        bridgeSends: result.bridgeSends,
+      },
       'scanned',
     )
   }
   return result
 }
 
-export type { RiskVerdictRow, PacketApprovalRow, TransferRow }
+export type { RiskVerdictRow, PacketApprovalRow, TransferRow, BridgeSendRow }

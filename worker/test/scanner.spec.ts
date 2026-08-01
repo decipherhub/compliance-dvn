@@ -57,6 +57,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     resolveDst: (eid: number) => (eid === 40232 ? optChain : undefined),
     verify: vi.fn(async () => '0xverifytx'),
     commit: vi.fn(async () => '0xcommittx'),
+    execute: vi.fn(async () => '0xlzreceivetx'),
     recordVerdict: vi.fn(async () => '0xrecordtx'),
     emitVerdictFor: new Set<string>(['block']),
     checkpoint: tmpCheckpoint(),
@@ -67,6 +68,7 @@ function deps(overrides: Record<string, unknown> = {}) {
   } as never as Parameters<typeof verifyPacket>[1] & {
     verify: ReturnType<typeof vi.fn>
     commit: ReturnType<typeof vi.fn>
+    execute: ReturnType<typeof vi.fn>
     recordVerdict: ReturnType<typeof vi.fn>
   }
 }
@@ -354,6 +356,114 @@ describe('verifyPacket', () => {
     expect(d.verify).not.toHaveBeenCalled()
   })
 
+  /**
+   * Committing only makes a packet executable. No executor runs `lzReceive` for a custom DVN
+   * pathway, so without this the message would sit committed and undelivered.
+   */
+  it('ALLOW: drives lzReceive after the commit lands', async () => {
+    const d = deps()
+    await verifyPacket(packet(), d)
+    expect(d.execute).toHaveBeenCalledOnce()
+    const [dst, header, guid, message] = d.execute.mock.calls[0]
+    expect(dst.key).toBe('optimismSepolia')
+    expect(header).toBe('0xheader')
+    expect(guid).toBe('0xguid')
+    expect(message).toBe('0xmsg')
+    const text = await d.metrics.registry.metrics()
+    expect(text).toMatch(/dvn_deliveries_total\{[^}]*result="success"[^}]*\} 1/)
+  })
+
+  it('does not attempt delivery when the commit failed', async () => {
+    const d = deps({ commit: vi.fn(async () => { throw new Error('not committable yet') }) })
+    await verifyPacket(packet(), d)
+    expect(d.execute).not.toHaveBeenCalled()
+  })
+
+  // Enforcement is already settled by then, so a delivery failure must not undo the verification.
+  it('keeps the packet processed when lzReceive fails', async () => {
+    const d = deps({ execute: vi.fn(async () => { throw new Error('already executed') }) })
+    await verifyPacket(packet(), d)
+    expect(d.checkpoint.isProcessed(KEY)).toBe(true)
+    const text = await d.metrics.registry.metrics()
+    expect(text).toMatch(/dvn_deliveries_total\{[^}]*result="failure"[^}]*\} 1/)
+  })
+
+  it('tolerates a packet with no guid — nothing to deliver with', async () => {
+    const d = deps()
+    await verifyPacket(packet({ guid: undefined }), d)
+    expect(d.verify).toHaveBeenCalledOnce()
+    expect(d.execute).not.toHaveBeenCalled()
+  })
+
+  it('carries guid and message through a hold, so a released packet still delivers', async () => {
+    const now = 1_000_000
+    const d = deps({ assessor: makeAssessor(storeWith(['sanctions_1hop'], 'trusted_indexer')), now: () => now })
+    await verifyPacket(packet(), d)
+    const rec = d.checkpoint.getDeferred(KEY)
+    expect(rec?.action).toBe('manual-review')
+    expect(rec?.guid).toBe('0xguid')
+    expect(rec?.message).toBe('0xmsg')
+
+    // Owner approves; the release path must deliver too.
+    d.checkpoint.addApproval(PAYLOAD)
+    await processDeferred({ ...d, now: () => now })
+    expect(d.execute).toHaveBeenCalledOnce()
+  })
+
+  /**
+   * The LayerZero executor watches the same pathway and sometimes commits first. The ULN reports
+   * "already committed" with the same revert it uses for "not verified yet", so the destination's
+   * state is what tells a lost race from a real failure.
+   */
+  describe('racing the executor', () => {
+    const failCommit = () => vi.fn(async () => { throw new Error('execution reverted') })
+
+    it('reports a commit the executor already made as done, and still delivers', async () => {
+      const d = deps({ commit: failCommit(), commitState: vi.fn(async () => 'committed') })
+      await verifyPacket(packet(), d)
+      expect(d.execute).toHaveBeenCalledOnce() // committed by someone — ours to deliver
+      const text = await d.metrics.registry.metrics()
+      expect(text).toMatch(/dvn_commits_total\{[^}]*result="raced"[^}]*\} 1/)
+      expect(text).not.toMatch(/dvn_commits_total\{[^}]*result="failure"/)
+    })
+
+    it('skips delivery when the executor already executed the packet', async () => {
+      const d = deps({ commit: failCommit(), commitState: vi.fn(async () => 'cleared') })
+      await verifyPacket(packet(), d)
+      expect(d.execute).not.toHaveBeenCalled()
+      expect(d.checkpoint.isProcessed(KEY)).toBe(true)
+    })
+
+    it('reports a lost delivery race as delivered, not failed', async () => {
+      const d = deps({
+        execute: vi.fn(async () => { throw new Error('execution reverted') }),
+        commitState: vi.fn(async () => 'cleared'),
+      })
+      await verifyPacket(packet(), d)
+      const text = await d.metrics.registry.metrics()
+      expect(text).toMatch(/dvn_deliveries_total\{[^}]*result="raced"[^}]*\} 1/)
+    })
+
+    // The distinction must never soften a real failure: nothing committed means nothing committed.
+    it('still reports a real commit failure when the destination has nothing', async () => {
+      const d = deps({ commit: failCommit(), commitState: vi.fn(async () => 'pending') })
+      await verifyPacket(packet(), d)
+      expect(d.execute).not.toHaveBeenCalled()
+      const text = await d.metrics.registry.metrics()
+      expect(text).toMatch(/dvn_commits_total\{[^}]*result="failure"[^}]*\} 1/)
+    })
+
+    it('treats an unreadable destination as a failure rather than a race', async () => {
+      const d = deps({
+        commit: failCommit(),
+        commitState: vi.fn(async () => { throw new Error('rpc down') }),
+      })
+      await verifyPacket(packet(), d)
+      const text = await d.metrics.registry.metrics()
+      expect(text).toMatch(/dvn_commits_total\{[^}]*result="failure"[^}]*\} 1/)
+    })
+  })
+
   it('still marks processed when commit fails (verification already on-chain)', async () => {
     const d = deps({ commit: vi.fn(async () => { throw new Error('commit not ready') }) })
     await verifyPacket(packet(), d)
@@ -363,11 +473,51 @@ describe('verifyPacket', () => {
     expect(text).toMatch(/dvn_commits_total\{[^}]*result="failure"[^}]*\} 1/)
   })
 
-  it('leaves the packet unprocessed when submitVerification fails, so it retries', async () => {
+  // The scan cursor advances past the packet's block whether or not the send landed, so a
+  // failed send must leave a deferred record behind — "unprocessed" alone is a packet that is
+  // never presented again, i.e. lost.
+  it('defers the packet when submitVerification fails, so the queue retries it', async () => {
     const d = deps({ verify: vi.fn(async () => { throw new Error('nonce too low') }) })
     await verifyPacket(packet(), d)
     expect(d.checkpoint.isProcessed(KEY)).toBe(false)
     expect(d.commit).not.toHaveBeenCalled()
+    const rec = d.checkpoint.getDeferred(KEY)
+    expect(rec?.action).toBe('delay')
+    expect(rec?.attempts).toBe(0)
+  })
+
+  it('recovers a send-failed packet end-to-end once verify works again', async () => {
+    const now = 1_000_000
+    const d = deps({
+      verify: vi.fn(async () => { throw new Error('ETIMEDOUT') }),
+      now: () => now,
+    })
+    await verifyPacket(packet(), d)
+    expect(d.checkpoint.getDeferred(KEY)).toBeDefined()
+
+    // Verify comes back; the delay queue re-screens (still clean) and the send lands.
+    d.verify.mockImplementation(async () => '0xverifytx')
+    await processDeferred({ ...d, now: () => now + DELAY_POLICY.retryAfterMs + 1 })
+    expect(d.verify).toHaveBeenCalledTimes(2)
+    expect(d.checkpoint.isProcessed(KEY)).toBe(true)
+    expect(d.checkpoint.getDeferred(KEY)).toBeUndefined()
+  })
+
+  it('escalates a persistently send-failing packet to manual review instead of retrying forever', async () => {
+    let now = 1_000_000
+    const d = deps({
+      verify: vi.fn(async () => { throw new Error('ETIMEDOUT') }),
+      now: () => now,
+    })
+    await verifyPacket(packet(), d)
+
+    for (let i = 0; i < DELAY_POLICY.maxAttempts; i++) {
+      now += DELAY_POLICY.retryAfterMs + 1
+      await processDeferred(d)
+    }
+    const rec = d.checkpoint.getDeferred(KEY)
+    expect(rec?.action).toBe('manual-review')
+    expect(d.checkpoint.isProcessed(KEY)).toBe(false)
   })
 })
 
@@ -380,6 +530,13 @@ describe('verdict emission', () => {
     expect(verdict.score).toBe(0)
     expect(verdict.evidenceHash).toMatch(/^0x[0-9a-f]{64}$/)
     expect(d.recordVerdict).not.toHaveBeenCalled() // no separate tx for an allow
+  })
+
+  it('counts screening evidence by type and source, for the dashboard', async () => {
+    const d = deps({ assessor: makeAssessor(storeWith(['sanctions'])) })
+    await verifyPacket(packet(), d)
+    const text = await d.metrics.registry.metrics()
+    expect(text).toMatch(/dvn_screening_evidence_total\{(?=[^}]*type="sanctions")(?=[^}]*source="ofac")[^}]*\} 1/)
   })
 
   it('BLOCK: records the verdict in a separate transaction with the reason mask', async () => {
@@ -607,5 +764,65 @@ describe('processDeferred', () => {
     const second = deps({ checkpoint: reloaded, now: () => t0 + 1000 })
     await processDeferred(second)
     expect(second.verify).toHaveBeenCalledOnce()
+  })
+})
+
+/**
+ * Owner rejection. Refusal is not a DVN call: the owner skips the nonce on the endpoint, which
+ * makes the packet permanently unexecutable, and the worker's only job is to stop carrying it.
+ */
+describe('processDeferred: owner rejection by skipped nonce', () => {
+  /** A held manual-review packet, ready to be reconsidered. */
+  async function heldPacket(overrides: Record<string, unknown> = {}) {
+    const d = deps({ assessor: makeAssessor(storeWith(['sanctions_1hop'], 'trusted_indexer')), ...overrides })
+    await verifyPacket(packet(), d)
+    expect(d.checkpoint.getDeferred(KEY)?.action).toBe('manual-review')
+    return d
+  }
+
+  it('drops a held packet whose nonce the owner skipped', async () => {
+    const abandoned = vi.fn(async () => true)
+    const d = await heldPacket({ abandoned })
+    await processDeferred(d)
+
+    expect(abandoned).toHaveBeenCalledWith(optChain, '0xheader')
+    expect(d.checkpoint.getDeferred(KEY)).toBeUndefined()
+    expect(d.checkpoint.isProcessed(KEY)).toBe(true)
+    expect(d.verify).not.toHaveBeenCalled()
+    const text = await d.metrics.registry.metrics()
+    expect(text).toMatch(/dvn_decisions_total\{[^}]*action="rejected"[^}]*\} 1/)
+  })
+
+  // The check has to beat the manual-review early-continue, or the one kind of hold a human
+  // actually rejects would never be looked at.
+  it('checks manual-review holds, which are otherwise skipped without re-screening', async () => {
+    const abandoned = vi.fn(async () => false)
+    const d = await heldPacket({ abandoned })
+    await processDeferred(d)
+    expect(abandoned).toHaveBeenCalledOnce()
+    expect(d.checkpoint.getDeferred(KEY)?.action).toBe('manual-review') // still held
+  })
+
+  it('keeps the hold when the check cannot be made', async () => {
+    const d = await heldPacket({ abandoned: vi.fn(async () => { throw new Error('rpc down') }) })
+    await processDeferred(d)
+    expect(d.checkpoint.getDeferred(KEY)?.action).toBe('manual-review')
+    expect(d.checkpoint.isProcessed(KEY)).toBe(false)
+  })
+
+  // The endpoint has already made the packet undeliverable, so releasing it would only spend gas
+  // verifying something that can never execute.
+  it('rejection wins over an approval, since the chain will not carry the packet either way', async () => {
+    const d = await heldPacket({ abandoned: vi.fn(async () => true) })
+    d.checkpoint.addApproval(PAYLOAD)
+    await processDeferred(d)
+    expect(d.verify).not.toHaveBeenCalled()
+    expect(d.checkpoint.getDeferred(KEY)).toBeUndefined()
+  })
+
+  it('leaves the queue alone when no rejection check is wired', async () => {
+    const d = await heldPacket()
+    await processDeferred(d)
+    expect(d.checkpoint.getDeferred(KEY)?.action).toBe('manual-review')
   })
 })

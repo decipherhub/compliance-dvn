@@ -90,16 +90,15 @@ share the packet loop's latency budget. Follow what `RpcContractInspector` does:
 Call sites to keep in mind if the signature ever changes again:
 
 - `worker/runtime/scanner.ts` (`verifyPacket`, `processDeferred` — the live decision paths)
-- `worker/cli.ts` (`cmdAssess`, `cmdVerify`)
-- `worker/tracker/trace.ts` (`buildTrace`)
 
 ## Run it
 
 ```bash
 pnpm test:worker          # unit tests live in worker/test/
-pnpm cli assess <address> # one-shot: see the Assessment for any address
-pnpm cli pending          # packets currently held for delay / manual review
 ```
+
+Screening results and held packets are visible in the demo dashboard (`demo/dashboard/`) and on
+the worker's HTTP surface (`/status`, `/pending`).
 
 Add tests next to the existing ones (`worker/test/assess.spec.ts`, `ingest/*` specs). Keep
 network calls behind an injected fetcher so tests stay offline.

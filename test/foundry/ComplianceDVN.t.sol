@@ -23,7 +23,8 @@ contract ComplianceDVNTest is Test {
     address receiveUln = address(0xCAFE);
 
     function setUp() public {
-        dvn = new ComplianceDVN(address(this), operator, receiveUln, 0.0001 ether);
+        // sendUln = this test contract, so the assignJob tests below can call it directly.
+        dvn = new ComplianceDVN(address(this), operator, address(this), receiveUln, 0.0001 ether);
     }
 
     function test_getFee_returnsConfiguredFee() public view {
@@ -39,7 +40,7 @@ contract ComplianceDVNTest is Test {
 
     function test_submitVerification_forwardsToReceiveUln_andEmitsVerdict() public {
         MockReceiveUln mock = new MockReceiveUln();
-        ComplianceDVN d = new ComplianceDVN(address(this), operator, address(mock), 0);
+        ComplianceDVN d = new ComplianceDVN(address(this), operator, address(this), address(mock), 0);
         vm.expectEmit(true, false, false, true);
         emit ComplianceDVN.RiskVerdict(keccak256("p"), 0, 12, 5, keccak256("ev"));
         vm.prank(operator);
@@ -53,7 +54,7 @@ contract ComplianceDVNTest is Test {
     /// not be able to contradict itself.
     function test_submitVerification_rejectsNonAllowAction() public {
         MockReceiveUln mock = new MockReceiveUln();
-        ComplianceDVN d = new ComplianceDVN(address(this), operator, address(mock), 0);
+        ComplianceDVN d = new ComplianceDVN(address(this), operator, address(this), address(mock), 0);
         for (uint8 action = 1; action <= 3; action++) {
             vm.prank(operator);
             vm.expectRevert(abi.encodeWithSelector(ComplianceDVN.VerificationRequiresAllow.selector, action));
@@ -134,6 +135,8 @@ contract ComplianceDVNTest is Test {
     function test_setters_onlyOwner() public {
         dvn.setOperator(address(0xAAA));
         assertEq(dvn.operator(), address(0xAAA));
+        dvn.setSendUln(address(0xCCC));
+        assertEq(dvn.sendUln(), address(0xCCC));
         dvn.setReceiveUln(address(0xBBB));
         assertEq(dvn.receiveUln(), address(0xBBB));
         dvn.setFee(123);
@@ -169,6 +172,21 @@ contract ComplianceDVNTest is Test {
         });
         uint256 ret = dvn.assignJob{ value: 0 }(p, "");
         assertEq(ret, 0.0001 ether);
+    }
+
+    // The worker treats a JobAssigned payloadHash as "ours to screen" and spends operator gas
+    // verifying it, so anyone able to assign jobs could point the worker at foreign packets.
+    function test_assignJob_rejectsNonSendLibrary() public {
+        ILayerZeroDVN.AssignJobParam memory p = ILayerZeroDVN.AssignJobParam({
+            dstEid: 40245,
+            packetHeader: hex"01",
+            payloadHash: keccak256("payload"),
+            confirmations: 5,
+            sender: address(0x1234)
+        });
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(ComplianceDVN.NotSendLibrary.selector);
+        dvn.assignJob(p, "");
     }
 
     receive() external payable {}

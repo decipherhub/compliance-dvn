@@ -25,7 +25,7 @@ describe('loadConfig', () => {
     expect(cfg.reorgDepth).toBe(32)
     expect(cfg.feedSource).toBe('trusted-indexer-a')
     expect(cfg.feedTtlSec).toBe(7200)
-    expect(cfg.policyVersion).toBe(1)
+    expect(cfg.policyVersion).toBe(2) // v2: 3-hop graph proximity
     expect(cfg.httpPort).toBe(9091)
     expect(cfg.chains.map((c) => c.key).sort()).toEqual(Object.keys(CHAIN_REGISTRY).sort())
   })

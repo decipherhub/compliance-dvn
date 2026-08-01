@@ -206,16 +206,32 @@ describe('ingestFeed', () => {
     expect(store.size).toBe(0)
   })
 
-  it('rejects a replay of the accepted version or older', async () => {
+  it('rejects a rollback to an older version', async () => {
     const store = new RiskStore({ now: () => NOW_MS })
     const versions = versionStore({ 'trusted-indexer-a': 5 })
-    for (const version of [4, 5]) {
-      await expect(
-        ingestFeed(store, cfg, deps({ fetcher: async () => await signed(feedBody({ version })), versions })),
-      ).rejects.toThrow(/replayed/)
-    }
+    await expect(
+      ingestFeed(store, cfg, deps({ fetcher: async () => await signed(feedBody({ version: 4 })), versions })),
+    ).rejects.toThrow(/replayed/)
+    expect(store.size).toBe(0)
+    expect(versions.get('trusted-indexer-a')).toBe(5)
+
     await ingestFeed(store, cfg, deps({ fetcher: async () => await signed(feedBody({ version: 6 })), versions }))
     expect(versions.get('trusted-indexer-a')).toBe(6)
+  })
+
+  // A fresh store on a rebuild or a restart holds the version but not the labels, so refusing the
+  // current version would leave it with no feed-derived labels at all until the indexer published.
+  it('re-applies the version already accepted, so a fresh store recovers its labels', async () => {
+    const store = new RiskStore({ now: () => NOW_MS })
+    const versions = versionStore({ 'trusted-indexer-a': 5 })
+    const applied = await ingestFeed(
+      store,
+      cfg,
+      deps({ fetcher: async () => await signed(feedBody({ version: 5 })), versions }),
+    )
+    expect(applied).toBeGreaterThan(0)
+    expect(store.size).toBeGreaterThan(0)
+    expect(versions.get('trusted-indexer-a')).toBe(5)
   })
 
   it('tracks versions per source, so two indexers do not block each other', async () => {

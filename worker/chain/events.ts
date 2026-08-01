@@ -39,20 +39,41 @@ export const ENDPOINT_ABI = [
   'event PacketSent(bytes encodedPayload, bytes options, address sendLibrary)',
 ]
 
-/** Scan a block range on the source endpoint for PacketSent and return parsed packets. */
+/**
+ * Scan a block range on the source endpoint for PacketSent and return parsed packets.
+ *
+ * The endpoint is shared by every OApp on the chain, so most of what this sees belongs to
+ * strangers — arbitrary message shapes, not OFT transfers. A packet we cannot decode is
+ * therefore expected traffic, not an error, and is skipped rather than thrown: letting one
+ * foreign log escape would abort the whole chain scan, and because the checkpoint is frozen on
+ * failure the same log would abort it again forever.
+ *
+ * Skipping is safe in the fail-closed sense — withholding verification IS the veto, so a packet
+ * we never parsed is also a packet we never let through. `onSkip` exists so it is still counted
+ * and visible rather than silently dropped.
+ */
 export async function scanPacketSent(
   provider: ethers.providers.Provider,
   endpoint: string,
   fromBlock: number,
   toBlock: number,
+  onSkip?: (payloadHash: string, reason: string) => void,
 ): Promise<ParsedPacket[]> {
   const iface = new ethers.utils.Interface(ENDPOINT_ABI)
   const topic = iface.getEventTopic('PacketSent')
   const logs = await provider.getLogs({ address: endpoint, topics: [topic], fromBlock, toBlock })
-  return logs.map((l) => {
-    const decoded = iface.decodeEventLog('PacketSent', l.data, l.topics)
-    return parseEncodedPacket(decoded.encodedPayload as string)
-  })
+  const packets: ParsedPacket[] = []
+  for (const l of logs) {
+    const encoded = stripHex(iface.decodeEventLog('PacketSent', l.data, l.topics).encodedPayload as string)
+    try {
+      packets.push(parseEncodedPacket('0x' + encoded))
+    } catch (err) {
+      // The payload hash needs only the split, so an undecodable packet is still identifiable.
+      const payloadHash = ethers.utils.keccak256('0x' + encoded.slice(81 * 2))
+      onSkip?.(payloadHash, (err as Error).message)
+    }
+  }
+  return packets
 }
 
 export const DVN_EVENT_ABI = [

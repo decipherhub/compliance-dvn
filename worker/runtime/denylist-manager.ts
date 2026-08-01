@@ -17,7 +17,14 @@ export interface DenylistManagerDeps {
   now?: () => number
   /** Sleep used between initial-build retries. Injectable for tests. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Re-ingest the indexer feed into the current store. Optional; without it feed labels only
+   * arrive with a full rebuild. Returns the number of entries applied.
+   */
+  refreshFeed?: (store: RiskStore) => Promise<number>
   refreshMs: number
+  /** How often to run `refreshFeed`. Omit (or match `refreshMs`) to leave feed timing unchanged. */
+  feedRefreshMs?: number
   maxStalenessMs: number
   /**
    * `degrade` keeps verifying on authoritative sources alone when the feed is missing;
@@ -48,6 +55,7 @@ export class DenylistManager {
   private _state: DvnState = 'INITIALIZING'
   private _degraded: string[] = []
   private timer: NodeJS.Timeout | undefined
+  private feedTimer: NodeJS.Timeout | undefined
   private stopped = false
 
   private readonly build: () => Promise<RiskStoreBuild>
@@ -123,6 +131,36 @@ export class DenylistManager {
     this.timer = setInterval(() => void this.refresh(), this.deps.refreshMs)
     // Don't keep the event loop alive solely for the refresh timer.
     this.timer.unref?.()
+
+    // A separate, usually much shorter cadence for the feed alone — see refreshFeed below.
+    const feedMs = this.deps.feedRefreshMs
+    if (this.deps.refreshFeed && feedMs && feedMs < this.deps.refreshMs) {
+      this.feedTimer = setInterval(() => void this.refreshFeed(), feedMs)
+      this.feedTimer.unref?.()
+    }
+  }
+
+  /**
+   * Pull the indexer feed into the store already in use. Never throws.
+   *
+   * Deliberately does NOT touch `builtAt`: the freshness gate is about the authoritative sources,
+   * and letting a cheap feed fetch reset it would keep a stale sanctions list looking current.
+   */
+  async refreshFeed(): Promise<number> {
+    if (this.stopped || !this.current || !this.deps.refreshFeed) return 0
+    try {
+      const applied = await this.deps.refreshFeed(this.current)
+      if (applied > 0) {
+        this.publishMetrics()
+        // Debug, not info: this runs every few seconds and usually re-applies an unchanged feed.
+        // The indexer logs each publish, and `dvn_denylist_size` tracks the result.
+        this.deps.logger.debug({ entries: applied, size: this.current.size }, 'indexer feed refreshed')
+      }
+      return applied
+    } catch (err) {
+      this.deps.logger.warn({ err: (err as Error).message }, 'feed refresh failed; keeping current labels')
+      return 0
+    }
   }
 
   /** Attempt a refresh. Returns whether it succeeded. Never throws. */
@@ -235,6 +273,8 @@ export class DenylistManager {
   stop(): void {
     this.stopped = true
     if (this.timer) clearInterval(this.timer)
+    if (this.feedTimer) clearInterval(this.feedTimer)
     this.timer = undefined
+    this.feedTimer = undefined
   }
 }

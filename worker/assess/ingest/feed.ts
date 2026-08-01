@@ -230,9 +230,13 @@ export async function ingestFeed(store: RiskStore, cfg: FeedConfig, deps: Ingest
       `feed policyVersion ${feed.policyVersion} != worker POLICY_VERSION ${POLICY_VERSION}`,
     )
   }
+  // Only a rollback is a replay. Re-applying the version we already hold is how a fresh store (a
+  // full rebuild, or a restart) recovers the current labels, and how a polling refresh reads a feed
+  // that simply has not changed yet — rejecting it there would drop every feed-derived label until
+  // the indexer next published, and report a healthy source as unavailable meanwhile.
   const lastVersion = deps.versions.get(feed.source)
-  if (feed.version <= lastVersion) {
-    throw new FeedError('replayed', `version ${feed.version} is not newer than accepted ${lastVersion}`)
+  if (feed.version < lastVersion) {
+    throw new FeedError('replayed', `version ${feed.version} is older than accepted ${lastVersion}`)
   }
   if (feed.expiresAt <= nowSec) {
     throw new FeedError('expired', `expiresAt ${feed.expiresAt} is not in the future (now ${nowSec})`)

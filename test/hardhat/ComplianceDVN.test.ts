@@ -21,6 +21,7 @@ describe('ComplianceDVN', () => {
     let owner: SignerWithAddress
     let operator: SignerWithAddress
     let stranger: SignerWithAddress
+    let sendLib: SignerWithAddress
     let dvn: Contract
     let receiveUln: Contract
 
@@ -55,13 +56,13 @@ describe('ComplianceDVN', () => {
     }
 
     before(async () => {
-        ;[owner, operator, stranger] = await ethers.getSigners()
+        ;[owner, operator, stranger, sendLib] = await ethers.getSigners()
     })
 
     beforeEach(async () => {
         receiveUln = await (await ethers.getContractFactory('ReceiveUlnMock')).deploy()
         const DVN = await ethers.getContractFactory('ComplianceDVN')
-        dvn = await DVN.deploy(owner.address, operator.address, receiveUln.address, 0)
+        dvn = await DVN.deploy(owner.address, operator.address, sendLib.address, receiveUln.address, 0)
         await dvn.deployed()
     })
 
@@ -174,23 +175,39 @@ describe('ComplianceDVN', () => {
     })
 
     describe('assignJob', () => {
+        const param = {
+            dstEid: 40245,
+            packetHeader: '0x01',
+            payloadHash: PAYLOAD,
+            confirmations: 5,
+            sender: '0x0000000000000000000000000000000000001234',
+        }
+
         // SendUln302 calls assignJob with msg.value == 0 (it accrues worker fees internally), so
         // requiring payment here would revert every real send.
         it('succeeds with zero value and returns the fee quote', async () => {
             const fee = ethers.utils.parseEther('0.00005')
             const DVN = await ethers.getContractFactory('ComplianceDVN')
-            const paid = await DVN.deploy(owner.address, operator.address, receiveUln.address, fee)
-            const param = {
-                dstEid: 40245,
-                packetHeader: '0x01',
-                payloadHash: PAYLOAD,
-                confirmations: 5,
-                sender: stranger.address,
-            }
-            const quoted: BigNumber = await paid.callStatic.assignJob(param, '0x', { value: 0 })
+            const paid = await DVN.deploy(owner.address, operator.address, sendLib.address, receiveUln.address, fee)
+            const quoted: BigNumber = await paid.connect(sendLib).callStatic.assignJob(param, '0x', { value: 0 })
             expect(quoted.toString()).to.equal(fee.toString())
-            const args = await eventArgs(paid.assignJob(param, '0x', { value: 0 }), paid, 'JobAssigned')
+            const args = await eventArgs(paid.connect(sendLib).assignJob(param, '0x', { value: 0 }), paid, 'JobAssigned')
             expect(args.payloadHash).to.equal(PAYLOAD)
+        })
+
+        // The worker treats a JobAssigned payloadHash as "ours to screen" and spends operator gas
+        // verifying it, so anyone able to assign jobs could point the worker at packets no one
+        // asked it to verify.
+        it('rejects a caller that is not the send library', async () => {
+            await expectRevert(dvn.connect(stranger).assignJob(param, '0x', { value: 0 }), 'NotSendLibrary')
+            await expectRevert(dvn.connect(owner).assignJob(param, '0x', { value: 0 }), 'NotSendLibrary')
+        })
+
+        it('follows a setSendUln change', async () => {
+            await dvn.connect(owner).setSendUln(stranger.address)
+            const args = await eventArgs(dvn.connect(stranger).assignJob(param, '0x', { value: 0 }), dvn, 'JobAssigned')
+            expect(args.payloadHash).to.equal(PAYLOAD)
+            await expectRevert(dvn.connect(sendLib).assignJob(param, '0x', { value: 0 }), 'NotSendLibrary')
         })
     })
 })

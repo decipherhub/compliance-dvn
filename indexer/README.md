@@ -72,10 +72,13 @@ short of), a bounded window is unwound wholesale. Whether the rewrite went deepe
 against a real anchor — the deepest block still on record below that window — and if that also
 disagrees the scan aborts loudly instead of leaving stale rows underneath it.
 
-**Graph.** Depth 1 (`GRAPH_DEPTH`, matching the worker's `N_HOP.depth`), direction-aware. Outbound
-(subject → seed) needs no threshold: sending to a sanctioned address is the subject's own act.
-Inbound (seed → subject) counts only at or above a per-token minimum, because anyone can push a
-tainted transfer at a victim to poison their address.
+**Graph.** Depth 3 (`GRAPH_DEPTH`, matching the worker's `N_HOP.depth`), direction-aware, with a
+label per depth (`sanctions_1hop/2hop/3hop`, …) so the worker can weight distance. A path counts
+only if funds could have flowed along it: same chain, non-decreasing block order, no vertex twice,
+no seed anywhere but the far endpoint, and the shortest route wins. The subject's own first
+outbound edge needs no threshold; every other edge — outbound relays and all inbound hops — must
+clear the per-token minimum, because anyone can push (or relay) a tainted transfer to poison an
+address they do not control.
 
 Those minimums come from `TOKEN_MINIMUMS` and are **what turns the inbound signal on** — a token
 with no entry is never labelled inbound, so leaving it empty means `sanctions_1hop_inbound` never

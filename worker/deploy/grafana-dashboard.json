@@ -383,6 +383,50 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "id": 12,
+      "title": "Risk evidence observed (by signal type)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum by (type, source) (increase(dvn_screening_evidence_total[15m]))",
+          "legendFormat": "{{type}} ({{source}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Evidence totals by type",
+      "type": "piechart",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum by (type) (dvn_screening_evidence_total)",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

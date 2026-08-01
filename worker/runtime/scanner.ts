@@ -8,6 +8,7 @@ import { combine } from '../assess/assess'
 import { DELAY_POLICY, type RiskAction } from '../assess/policy'
 import { encodeVerdict, type OnChainVerdict } from '../assess/verdict'
 import { Checkpoint, type DeferredAction, type DeferredRecord, type Party } from '../checkpoint'
+import { briefError } from './errors'
 
 /** The slice of an ethers provider the scanner needs (kept tiny for testability). */
 export interface BlockHeightSource {
@@ -17,6 +18,7 @@ export interface BlockHeightSource {
 export interface ScanChainDeps {
   chain: ResolvedChain
   provider: BlockHeightSource
+  /** Blocks to stay behind the head while scanning — NOT the value attested on-chain. */
   confirmations: number
   /** How far back to backfill on a cold checkpoint. */
   scanWindow: number
@@ -106,6 +108,15 @@ export async function scanChainOnce(deps: ScanChainDeps): Promise<void> {
   }
 }
 
+/**
+ * How far a packet has already got on the destination, independent of who took it there.
+ *
+ *  - `pending`   nothing has committed it; a commit failure here is a real failure
+ *  - `committed` the payload is committed and waiting to be executed
+ *  - `cleared`   the slot has moved on — executed, or abandoned by a skip
+ */
+export type CommitState = 'pending' | 'committed' | 'cleared'
+
 /** Everything both the live path and the deferred-queue path need. */
 export interface ProcessDeferredDeps {
   assessor: Assessor
@@ -118,12 +129,28 @@ export interface ProcessDeferredDeps {
   ) => Promise<string>
   commit: (dst: ResolvedChain, header: string, payloadHash: string) => Promise<string>
   /**
+   * Deliver the message by running `lzReceive`. Optional: omitted, the packet is still verified and
+   * committed, and delivery waits on whatever executor is watching the pathway.
+   */
+  execute?: (dst: ResolvedChain, header: string, guid: string, message: string) => Promise<string>
+  /**
    * Emit a verdict for a packet that was not verified. Optional: omitted, the outcome is still
    * enforced and simply not recorded on-chain.
    */
   recordVerdict?: (dst: ResolvedChain, payloadHash: string, verdict: OnChainVerdict) => Promise<string>
   /** Which non-allow actions get a separate `recordVerdict` transaction. */
   emitVerdictFor?: ReadonlySet<RiskAction>
+  /**
+   * Whether the owner has abandoned a held packet by skipping its nonce. Optional: omitted, a
+   * rejected packet simply stays in the queue being re-screened.
+   */
+  abandoned?: (dst: ResolvedChain, header: string) => Promise<boolean>
+  /**
+   * What the destination already knows about a packet, used to tell a lost race from a real
+   * failure. Optional: omitted, a race is reported as a failure — noisy, but never wrong about
+   * enforcement.
+   */
+  commitState?: (dst: ResolvedChain, header: string, payloadHash: string) => Promise<CommitState>
   checkpoint: Checkpoint
   metrics: Metrics
   logger: Logger
@@ -143,11 +170,19 @@ interface Subject {
   dst: ResolvedChain
   srcChainKey: string
   parties: Party[]
+  /** Needed to deliver the message; absent for holds persisted before delivery was driven here. */
+  guid?: string
+  message?: string
 }
 
 /** Screen every party concurrently and fold the results into one verdict. */
 function screen(parties: Party[], assessor: Assessor): Promise<Assessment> {
   return Promise.all(parties.map((p) => assessor(p.subject, p.chainKey))).then(combine)
+}
+
+/** Count each evidence record a screening produced, so the dashboard shows which signals fire. */
+function countEvidence(verdict: Assessment, metrics: Metrics): void {
+  for (const e of verdict.evidence) metrics.screeningEvidence.inc({ type: e.type, source: e.source })
 }
 
 function publishPending(deps: ProcessDeferredDeps): void {
@@ -176,6 +211,10 @@ function encodeFor(
  *
  * The verdict travels with `submitVerification` at no extra transaction cost, so an allowed
  * packet always carries an on-chain reason for having been allowed.
+ *
+ * Returns whether the verification landed. On failure the caller must leave the packet
+ * somewhere the next tick can find it — the scan cursor advances past its block, so a packet
+ * that is neither processed nor deferred is lost, not retried.
  */
 async function submitAndCommit(
   s: Subject,
@@ -183,7 +222,7 @@ async function submitAndCommit(
   deps: ProcessDeferredDeps,
   log: Logger,
   opts: { overrideAction?: RiskAction; extraReasons?: string[] } = {},
-): Promise<void> {
+): Promise<boolean> {
   // The contract accepts only ACTION_ALLOW on a verification, so a release keeps its reasons
   // while reporting the action actually taken.
   const encoded = encodeFor(s, verdict, log, { overrideAction: 'allow', ...opts })
@@ -196,8 +235,8 @@ async function submitAndCommit(
     publishPending(deps)
   } catch (err) {
     deps.metrics.verifications.inc({ chain: s.srcChainKey, result: 'failure' })
-    log.error({ err: (err as Error).message }, 'submitVerification failed; will retry next scan')
-    return
+    log.error({ err: briefError(err) }, 'submitVerification failed; packet stays held for retry')
+    return false
   }
 
   try {
@@ -205,8 +244,63 @@ async function submitAndCommit(
     deps.metrics.commits.inc({ chain: s.srcChainKey, result: 'success' })
     log.info({ tx: commitTx, dst: s.dst.key }, 'COMMIT driven')
   } catch (err) {
-    deps.metrics.commits.inc({ chain: s.srcChainKey, result: 'failure' })
-    log.warn({ err: (err as Error).message }, 'commit pending (verified on-chain; executor/next run may commit)')
+    // The LayerZero executor watches this pathway too and sometimes commits first. When it does,
+    // our commit reverts with the same `LZ_ULN_Verifying` the ULN uses for "not verified yet" —
+    // committing consumes the attestation from storage, so the two are indistinguishable from the
+    // error alone. Asking the destination what state the packet is in tells them apart.
+    const state = await commitStateOf(s, deps, log)
+    if (state === 'pending' || state === 'unknown') {
+      deps.metrics.commits.inc({ chain: s.srcChainKey, result: 'failure' })
+      log.warn(
+        { err: briefError(err), state },
+        'commit pending (verified on-chain; executor/next run may commit)',
+      )
+      // Nothing to deliver until the packet is committed.
+      return true
+    }
+    deps.metrics.commits.inc({ chain: s.srcChainKey, result: 'raced' })
+    log.info({ state, dst: s.dst.key }, 'COMMIT already done by the executor')
+    if (state === 'cleared') return true // executed as well — nothing left to deliver
+  }
+
+  // Delivery. Committing only makes the packet executable — for a custom DVN pathway no executor
+  // runs `lzReceive`, so the message would sit undelivered. Best-effort like the commit: the
+  // enforcement decision is already settled, and a failure here costs delivery latency, not safety.
+  if (deps.execute && s.guid && s.message) {
+    try {
+      const tx = await deps.execute(s.dst, s.header, s.guid, s.message)
+      deps.metrics.deliveries.inc({ chain: s.srcChainKey, result: 'success' })
+      log.info({ tx, dst: s.dst.key }, 'DELIVERED (lzReceive driven)')
+    } catch (err) {
+      // Same race, one step later: the executor may have run `lzReceive` between our commit and
+      // this call, which leaves the nonce cleared and our call reverting.
+      if ((await commitStateOf(s, deps, log)) === 'cleared') {
+        deps.metrics.deliveries.inc({ chain: s.srcChainKey, result: 'raced' })
+        log.info({ dst: s.dst.key }, 'DELIVERED by the executor')
+      } else {
+        deps.metrics.deliveries.inc({ chain: s.srcChainKey, result: 'failure' })
+        log.warn(
+          { err: briefError(err) },
+          'lzReceive failed (committed on-chain; an executor or a later run may still deliver)',
+        )
+      }
+    }
+  }
+  return true
+}
+
+/** The destination's own account of a packet. `unknown` when it cannot be read — never assumed. */
+async function commitStateOf(
+  s: Subject,
+  deps: ProcessDeferredDeps,
+  log: Logger,
+): Promise<CommitState | 'unknown'> {
+  if (!deps.commitState) return 'unknown'
+  try {
+    return await deps.commitState(s.dst, s.header, s.payloadHash)
+  } catch (err) {
+    log.debug({ err: briefError(err) }, 'could not read the packet state on the destination')
+    return 'unknown'
   }
 }
 
@@ -225,6 +319,10 @@ function hold(
     payloadHash: s.payloadHash,
     dstEid: s.dstEid,
     header: s.header,
+    // Carried so a released packet can still be delivered: by then its source block is far behind
+    // the scan cursor and the message cannot be read again.
+    guid: s.guid,
+    message: s.message,
     srcChainKey: s.srcChainKey,
     parties: s.parties,
     action,
@@ -280,7 +378,7 @@ async function recordOutcome(
   } catch (err) {
     deps.metrics.verdictRecords.inc({ chain: s.srcChainKey, result: 'failure' })
     log.error(
-      { err: (err as Error).message, action: verdict.action },
+      { err: briefError(err), action: verdict.action },
       'verdict record FAILED — outcome is still enforced, but this decision has no on-chain record',
     )
   }
@@ -314,6 +412,7 @@ export async function verifyPacket(p: ParsedPacket, deps: VerifyPacketDeps): Pro
     { subject: p.oft.toAddress, chainKey: dst.key },
   ]
   const verdict = await screen(parties, deps.assessor)
+  countEvidence(verdict, deps.metrics)
   const s: Subject = {
     key,
     payloadHash: p.payloadHash,
@@ -322,18 +421,64 @@ export async function verifyPacket(p: ParsedPacket, deps: VerifyPacketDeps): Pro
     dst,
     srcChainKey: deps.srcChainKey,
     parties,
+    guid: p.guid,
+    message: p.message,
   }
 
   deps.metrics.decisions.inc({ chain: deps.srcChainKey, action: verdict.action })
   switch (verdict.action) {
-    case 'allow':
-      return submitAndCommit(s, verdict, deps, log)
+    case 'allow': {
+      if (await submitAndCommit(s, verdict, deps, log)) return
+      // The send failed after screening said allow. Defer rather than drop: the scan cursor
+      // advances past this packet's block, so without a deferred record it would never be
+      // presented again. The delay queue re-screens and re-sends until it lands (or, if the
+      // failure persists past DELAY_POLICY.maxAttempts, escalates to a human).
+      hold(s, verdict, 'delay', 0, deps, log)
+      return
+    }
     case 'block':
       return veto(s, verdict, deps, log)
     default:
       hold(s, verdict, verdict.action, 0, deps, log)
       return recordOutcome(s, verdict, deps, log)
   }
+}
+
+/**
+ * Drop a held packet whose nonce the owner skipped, and report whether it was dropped.
+ *
+ * This is the owner's refusal, observed rather than obeyed: skipping is signed on the endpoint by
+ * the OApp's delegate, and the endpoint enforces it — the worker has no say and no key for it. All
+ * that is left here is to stop carrying a packet that can never be delivered.
+ *
+ * A failed read leaves the packet in the queue. Guessing "abandoned" from an RPC error would throw
+ * away a legitimate hold, which is the one outcome that cannot be undone.
+ */
+async function dropIfAbandoned(
+  key: string,
+  rec: DeferredRecord,
+  dst: ResolvedChain,
+  deps: ProcessDeferredDeps,
+  log: Logger,
+): Promise<boolean> {
+  if (!deps.abandoned) return false
+  try {
+    if (!(await deps.abandoned(dst, rec.header))) return false
+  } catch (err) {
+    log.warn({ err: briefError(err) }, 'could not check whether the packet was skipped; keeping the hold')
+    return false
+  }
+
+  deps.checkpoint.clearDeferred(key)
+  deps.checkpoint.markProcessed(key)
+  deps.checkpoint.save()
+  publishPending(deps)
+  deps.metrics.decisions.inc({ chain: rec.srcChainKey, action: 'rejected' })
+  log.warn(
+    { heldMs: (deps.now ?? Date.now)() - rec.firstDeferredAt, action: rec.action },
+    'owner REJECTED — nonce skipped on the destination; dropping the held packet',
+  )
+  return true
 }
 
 /**
@@ -356,16 +501,26 @@ export async function processDeferred(deps: ProcessDeferredDeps): Promise<void> 
       deps.checkpoint.clearDeferred(key)
       continue
     }
-    const approved = deps.checkpoint.isApproved(rec.payloadHash)
-    if (!approved && (rec.action === 'manual-review' || rec.retryAfter > now)) continue
-
     const dst = deps.resolveDst(rec.dstEid)
     if (!dst) {
       deps.logger.warn({ dstEid: rec.dstEid, payloadHash: rec.payloadHash }, 'held packet: unknown destination EID')
       continue
     }
     const log = deps.logger.child({ chain: rec.srcChainKey, payloadHash: rec.payloadHash })
+
+    // Checked ahead of the retry gate, and ahead of approval: a manual-review hold is otherwise
+    // skipped outright here, and rejection is exactly the decision an operator makes about one.
+    //
+    // A rejected packet must leave the queue rather than be re-screened forever — and not only for
+    // tidiness. Holds are released when a re-screen comes back clean, so a packet the owner refused
+    // would be released the moment its risk label expired, into a channel that can no longer carry
+    // it. Dropping it makes the refusal stick.
+    if (await dropIfAbandoned(key, rec, dst, deps, log)) continue
+
+    const approved = deps.checkpoint.isApproved(rec.payloadHash)
+    if (!approved && (rec.action === 'manual-review' || rec.retryAfter > now)) continue
     const verdict = await screen(rec.parties, deps.assessor)
+    countEvidence(verdict, deps.metrics)
     const s: Subject = {
       key,
       payloadHash: rec.payloadHash,
@@ -374,6 +529,8 @@ export async function processDeferred(deps: ProcessDeferredDeps): Promise<void> 
       dst,
       srcChainKey: rec.srcChainKey,
       parties: rec.parties,
+      guid: rec.guid,
+      message: rec.message,
     }
 
     if (approved) {
@@ -403,15 +560,14 @@ export async function processDeferred(deps: ProcessDeferredDeps): Promise<void> 
     if (verdict.action === 'allow') {
       deps.metrics.decisions.inc({ chain: rec.srcChainKey, action: 'allow' })
       log.info({ attempts: rec.attempts }, 're-screened clean — releasing held packet')
-      await submitAndCommit(s, verdict, deps, log)
-      continue
-    }
-    if (verdict.action === 'block') {
+      if (await submitAndCommit(s, verdict, deps, log)) continue
+      // The send failed: fall through to the retry accounting below, so a destination chain
+      // that stays unreachable escalates to a human instead of retrying forever.
+    } else if (verdict.action === 'block') {
       deps.metrics.decisions.inc({ chain: rec.srcChainKey, action: 'block' })
       await veto(s, verdict, deps, log)
       continue
-    }
-    if (verdict.action === 'manual-review') {
+    } else if (verdict.action === 'manual-review') {
       const changed = rec.action !== 'manual-review'
       if (changed) deps.metrics.decisions.inc({ chain: rec.srcChainKey, action: 'manual-review' })
       hold(s, verdict, 'manual-review', rec.attempts, deps, log)

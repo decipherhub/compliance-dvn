@@ -1,6 +1,6 @@
 # `backend` ↔ `main` 차이
 
-이 문서를 처음 읽는 사람을 위한 안내입니다. 마지막 확인: 2026-07-30.
+이 문서를 처음 읽는 사람을 위한 안내입니다. 마지막 확인: 2026-07-31.
 
 ## ⚠️ 먼저 알아야 할 것: 아직 커밋되지 않았습니다
 
@@ -34,7 +34,7 @@ main     70ffd60   ← 같은 커밋
 | 판정          | 제재 주소 목록 대조 → 통과/거부 | 라벨 가중치 점수 + 소스 신뢰도 천장 → **4단계 행동**      |
 | 행동          | allow / block                   | allow / **delay** / **manual-review** / block             |
 | 보류 해제     | —                               | 시계(delay) 또는 **owner의 온체인 `approvePacket`**       |
-| 그래프 분석   | 없음                            | 신규 `indexer/` 패키지 (Postgres, 1-hop 근접성)           |
+| 그래프 분석   | 없음                            | 신규 `indexer/` 패키지 (Postgres, 최대 3-hop 근접성)      |
 | 감사 추적     | 없음                            | 온체인 `RiskVerdict` 이벤트 → 인덱서 → Postgres → Grafana |
 | 컨트랙트 검증 | 없음                            | Sourcify v2 조회 → `unverified_contract` 라벨             |
 | 관측          | Prometheus 메트릭               | + Grafana 대시보드 2개 (compose 프로파일)                 |
@@ -78,6 +78,12 @@ function submitVerification(
 컨트랙트는 업그레이더블이 아니므로 **기존 배포 주소를 재사용할 수 없습니다.** `dvn:preflight`가
 이 불일치를 감지해 알려줍니다.
 
+**생성자도 바뀌었습니다** — `assignJob`이 send library로 게이트되면서 `_sendUln` 파라미터가
+추가됐습니다 (`(_owner, _operator, _sendUln, _receiveUln, _fee)`). 게이트가 없으면 아무나
+`assignJob`을 호출해 임의 payloadHash로 `JobAssigned`를 발생시킬 수 있고, worker는 그걸 "우리
+일"로 믿고 남의 패킷을 심사·verify하며 operator 가스를 태우게 됩니다. 아래 §5의 기존 배포는
+이 게이트 이전 버전이므로 **재배포가 필요합니다** (`dvn:preflight`가 `sendUln()` 부재를 감지).
+
 신규 함수·이벤트:
 
 | 항목                                                                      | 권한            | 용도                                                                                                          |
@@ -112,12 +118,15 @@ Docker + PostgreSQL로 도는 별도 프로세스. worker와 코드를 공유하
 2. reorg 처리 — 저장된 블록 해시가 노드와 다르면 `REORG_DEPTH`(32) 창을 통째로 롤백
 3. Sourcify v2로 컨트랙트 검증 여부 조회. 응답을 못 받은 `unknown`과 미검증 `unverified`를
    구분하고 **라벨은 후자만** 만듭니다
-4. **1-hop 근접성** — 제재 주소로 보냈으면 `sanctions_1hop`(70점), 제재 주소가 보냈으면
-   `sanctions_1hop_inbound`(40점). 후자는 `TOKEN_MINIMUMS` 이상만 인정합니다 (dust를 보내
-   임의 주소에 라벨을 붙이는 걸 막기 위함)
+4. **최대 3-hop 근접성** — 홉마다 라벨·가중치가 다릅니다: outbound `sanctions_1hop`(70) /
+   `sanctions_2hop`(45) / `sanctions_3hop`(25), inbound 40/20/10, 믹서 60/35/20. 경로는 같은
+   체인·블록 비내림차순·단순 경로만 인정하고 최단 거리만 라벨링합니다. 주체 본인의 첫 outbound
+   엣지를 제외한 **모든 엣지는 `TOKEN_MINIMUMS` 이상**이어야 합니다 (dust로 임의 주소를
+   오염시키거나, 한 다리 건너 스미어하는 걸 막기 위함)
 5. 10분마다 피드 빌드 → 정수만 쓰는 canonical JSON + EIP-191 서명 → `:9091`로 서빙
 
-깊이는 **1홉으로 고정**입니다 (`GRAPH_DEPTH = 1`). 정책상 합의된 값이고 미구현이 아닙니다.
+깊이는 **3홉까지**입니다 (`GRAPH_DEPTH = 3`, 정책 v2). 3-hop 라벨은 단독으로는 어떤 행동도
+일으키지 않고(25 < delay 임계 30) 다른 신호와 합산될 때만 작용합니다.
 
 ---
 
@@ -153,9 +162,11 @@ Docker + PostgreSQL로 도는 별도 프로세스. worker와 코드를 공유하
 
 worker의 서명 키가 `PRIVATE_KEY` → **`OPERATOR_PRIVATE_KEY`** 로 바뀌었습니다. 루트 `.env`의
 `PRIVATE_KEY`는 owner 키이므로, 루트 파일을 worker로 복사하면 worker가 owner 권한을 갖게
-됩니다. 그래서 worker는 **`PRIVATE_KEY`가 있으면 부팅을 거부하고 이유를 설명합니다.**
+됩니다. 그래서 worker 서비스는 **환경에 `PRIVATE_KEY`나 `OWNER_PRIVATE_KEY`가 있으면 —
+`OPERATOR_PRIVATE_KEY`가 함께 있어도 — 부팅을 거부하고 이유를 설명합니다.**
 
-`OWNER_PRIVATE_KEY`는 CLI 셸에만 두고 worker 환경에는 **절대** 넣지 마세요.
+`OWNER_PRIVATE_KEY`는 배포 셸에만 두세요. owner 액션(승인·거절)은 데모 대시보드에서 MetaMask
+서명으로 이루어지므로, 어떤 서비스 환경에도 owner 키가 들어갈 일이 없습니다.
 
 ---
 
@@ -190,9 +201,9 @@ worker의 서명 키가 `PRIVATE_KEY` → **`OPERATOR_PRIVATE_KEY`** 로 바뀌�
 | base-sepolia     | MyOFT         | `0x81129e01913aBE10AB620B1fBB91820783DcDBf2` |
 | optimism-sepolia | MyOFT         | `0x81129e01913aBE10AB620B1fBB91820783DcDBf2` |
 
-`deployments/`에 배포 기록이 커밋되어 있으므로 재배포 없이 이어서 쓸 수 있습니다.
-단 **owner/operator 키는 작성자가 들고 있습니다.** 직접 트랜잭션을 보내려면 본인 키로
-재배포해야 합니다.
+⚠️ **위 주소들은 `assignJob` 게이트(§1) 이전 버전입니다.** 게이트를 적용하려면 재배포·재와이어링이
+필요하고, `dvn:preflight`가 이를 경고합니다. 그 외에도 **owner/operator 키는 작성자가 들고
+있으므로**, 직접 트랜잭션을 보내려면 어차피 본인 키로 재배포해야 합니다.
 
 동작 확인된 경로:
 
@@ -265,9 +276,9 @@ Grafana <http://localhost:3000/d/compliance-dvn-indexer> — datasource와 대�
 
 | 대상                | 결과           | 명령                                                  |
 | ------------------- | -------------- | ----------------------------------------------------- |
-| worker 단위 테스트  | **239 passed** | `cd worker && pnpm test`                              |
-| indexer 단위 테스트 | **102 passed** | `cd indexer && pnpm test`                             |
-| 컨트랙트 (hardhat)  | **13 passed**  | `npx hardhat test test/hardhat/ComplianceDVN.test.ts` |
+| worker 단위 테스트  | **254 passed** | `cd worker && pnpm test`                              |
+| indexer 단위 테스트 | **121 passed** | `cd indexer && pnpm test`                             |
+| 컨트랙트 (hardhat)  | **15 passed**  | `npx hardhat test test/hardhat/ComplianceDVN.test.ts` |
 | 타입 체크           | clean          | 각 패키지 `pnpm typecheck`                            |
 
 `worker/`와 `indexer/`는 루트 prettier 대상이 **아닙니다** (`.prettierignore`에서 제외).
@@ -286,7 +297,7 @@ Grafana <http://localhost:3000/d/compliance-dvn-indexer> — datasource와 대�
 - **native 값 엣지** — 이벤트를 남기지 않으므로 trace API가 필요하고, 공용 RPC 대부분이
   제공하지 않습니다
 - **`honeypot_suspect`** — 시뮬레이션이 필요합니다
-- **깊이 2 이상 순회** — 정책상 1홉 고정이므로 미구현이 아니라 결정 사항입니다
+- **깊이 4 이상 순회** — 정책상 3홉 고정(정책 v2)이므로 미구현이 아니라 결정 사항입니다
 
 엔드투엔드로 확인되지 **않은** 경로:
 
@@ -320,3 +331,53 @@ Grafana <http://localhost:3000/d/compliance-dvn-indexer> — datasource와 대�
 - [ ] `TEST_DENYLIST`가 데모용 `0x…dEaD`로 남아 있습니다. 정리 후 재시작 권장
 - [ ] 커밋을 쪼갤 것: 컨트랙트 ABI 변경 / 리스크 엔진 / 인덱서 신규 / 관측·문서 정도로
       나누면 리뷰가 가능합니다. 지금은 49 + 64 파일이 한 덩어리입니다
+
+---
+
+## 10. 데모용 가짜 스테이블코인 (테스트넷 전용)
+
+`contracts/mocks/FakeStablecoinMock.sol` — USDC 심볼을 주장하는 미끼 컨트랙트입니다. 가치가 없고
+스테이블코인도 아니며, 리스크 엔진의 사칭 탐지를 실제로 굴려보기 위한 것입니다.
+
+| 체인 | 주소 |
+| ---- | ---- |
+| base-sepolia | `0x1B48E40F971298b03B6AD0Ae3CA047CD11b7eA6e` |
+| optimism-sepolia | `0x7Ec44363Fdaa7EEC9B49a858220Ff543Bcd43ac7` |
+
+한 컨트랙트로 두 신호를 보여줍니다 (실측 확인):
+
+- 그대로 두면 `fake_stablecoin_suspect` 65점 → **manual-review**
+- `worker/.env`의 `SCAM_TOKENS`에 주소를 넣으면 `scam_token` 100점 → **block**
+
+수취인은 **도착 체인** 상태로 심사되므로, base→op 전송이면 op 쪽 주소를 수취인으로 지정해야 합니다.
+
+### 데모용 컨트랙트 두 개 (테스트넷 전용)
+
+| 컨트랙트 | 체인 | 주소 | 발화 신호 |
+| -------- | ---- | ---- | --------- |
+| `FakeStablecoinMock` | base-sepolia | `0x1B48E40F971298b03B6AD0Ae3CA047CD11b7eA6e` | `fake_stablecoin_suspect` 65 → manual-review |
+| `FakeStablecoinMock` | optimism-sepolia | `0x7Ec44363Fdaa7EEC9B49a858220Ff543Bcd43ac7` | (SCAM_TOKENS에 넣으면 `scam_token` 100 → block) |
+| `RiskyProxyMock` | optimism-sepolia | `0x9771013D82dcC2bdb489B982B4f201FD698A15e6` | `upgradeable_proxy` 15 + `contract_admin_risk` 50 = 65 → manual-review |
+
+`RiskyProxyMock`은 EIP-1967 슬롯에 admin을 `0x…dEaD`(TEST_DENYLIST 주소)로 써 둡니다. 실권자가
+오염된 업그레이더블 컨트랙트를 흉내내는 것이고, 다른 admin으로 배포하려면 `RISKY_ADMIN`을 주면
+됩니다.
+
+### 차단이 채널을 막는 문제와 `skip`
+
+검증을 보류한 패킷은 그 nonce가 영구히 비어 있고, LayerZero 채널은 nonce를 순서대로만 처리하므로
+**뒤의 정상 메시지가 모두 갇힙니다** (`LZ_InvalidNonce`). 해소는 `EndpointV2.skip`이며 OApp의
+delegate(= owner)만 호출할 수 있습니다. 대시보드 "보류 패킷" 탭의 **메시지 채널 상태** 섹션이
+막힌 nonce를 찾아 owner 서명으로 건너뛰게 해 줍니다.
+
+### 데모 지연시간 설정
+
+| 설정 | 파일 | 값 |
+| ---- | ---- | -- |
+| `POLL_MS` | worker | 3000 |
+| `SCAN_CONFIRMATIONS` | worker | 1 (온체인 증명값 `DVN_CONFIRMATIONS`=5는 ULN 요구조건이라 유지) |
+| `FEED_REFRESH_MS` | worker | 5000 — 피드만 재수신 (전체 재빌드는 60초) |
+| `POLL_MS` / `CONFIRMATIONS` | indexer | 5000 / 1 |
+| `FEED_REBUILD_MS` | indexer | 60000 — 단, **새 엣지가 잡히면 즉시 재발행** |
+
+전송 → 판정 ≈ 3.5초, 그래프 라벨 반영 ≈ 10초.

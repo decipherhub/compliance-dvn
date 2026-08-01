@@ -13,10 +13,11 @@ import { scanPacketSent, scanJobAssigned, scanPacketApproved } from './chain/eve
 import { ethersReader } from './chain/reader'
 import { RpcContractInspector, type ChainReader } from './assess/providers/contract'
 import { RpcTokenInspector } from './assess/providers/token'
-import { buildRiskStore } from './assess/assess'
+import { buildRiskStore, refreshFeedInto } from './assess/assess'
 import type { RiskAction } from './assess/policy'
 import { FeedError } from './assess/ingest/feed'
 import { Checkpoint } from './checkpoint'
+import { briefError } from './runtime/errors'
 
 const SCAN_WINDOW = Number(process.env.SCAN_BACKFILL_BLOCKS || 50)
 const SCAN_CHUNK = Number(process.env.SCAN_CHUNK_BLOCKS || 2000)
@@ -36,13 +37,20 @@ function interruptibleSleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const config: Config = loadConfig()
+  // forbidOwnerKeys: the service must never share an environment with an owner-capable key —
+  // the owner key is what approves the packets this process withholds.
+  const config: Config = loadConfig(process.env, { forbidOwnerKeys: true })
   const logger = createLogger(config)
   const metrics = createMetrics()
   metrics.up.set(1)
 
   logger.info(
-    { chains: config.chains.map((c) => c.key), pollMs: config.pollMs, confirmations: config.confirmations },
+    {
+      chains: config.chains.map((c) => c.key),
+      pollMs: config.pollMs,
+      confirmations: config.confirmations,
+      scanConfirmations: config.scanConfirmations,
+    },
     'compliance DVN worker starting',
   )
 
@@ -88,27 +96,34 @@ async function main(): Promise<void> {
     logger.warn('no INDEXER_FEED_URL — running on authoritative sources only, no graph labels')
   }
 
+  // Shared by the full rebuild and the feed-only refresh, so both apply the same replay protection
+  // and report a rejection the same way.
+  const feedOptions = {
+    feed,
+    feedDeps: {
+      versions: {
+        get: (source: string) => checkpoint.getFeedVersion(source),
+        set: (source: string, version: number) => {
+          checkpoint.setFeedVersion(source, version)
+          checkpoint.save()
+        },
+      },
+    },
+    onDegraded: (source: string, err: Error) => {
+      const reason = err instanceof FeedError ? err.reason : 'fetch_failed'
+      metrics.feedRejectedTotal.inc({ reason })
+      logger.error({ source, reason, err: err.message }, 'risk source unavailable — running degraded')
+    },
+  }
+
   // Denylist lifecycle (fail-closed state machine).
   const denylist = new DenylistManager({
-    build: () =>
-      buildRiskStore({
-        feed,
-        feedDeps: {
-          versions: {
-            get: (source) => checkpoint.getFeedVersion(source),
-            set: (source, version) => {
-              checkpoint.setFeedVersion(source, version)
-              checkpoint.save()
-            },
-          },
-        },
-        onDegraded: (source, err) => {
-          const reason = err instanceof FeedError ? err.reason : 'fetch_failed'
-          metrics.feedRejectedTotal.inc({ reason })
-          logger.error({ source, reason, err: err.message }, 'risk source unavailable — running degraded')
-        },
-      }),
+    build: () => buildRiskStore(feedOptions),
+    // A newly published graph label should be usable in seconds; re-downloading the sanctions
+    // lists that often would not be.
+    refreshFeed: (store) => refreshFeedInto(store, feedOptions),
     refreshMs: config.denylistRefreshMs,
+    feedRefreshMs: config.feedRefreshMs,
     maxStalenessMs: config.maxDenylistStalenessMs,
     degradedMode: config.degradedMode,
     providers: riskProviders,
@@ -137,7 +152,25 @@ async function main(): Promise<void> {
   })
 
   const isReady = () => running && denylist.state === 'READY'
-  const http = await startHttpServer({ port: config.httpPort, metrics, isReady, logger })
+  const http = await startHttpServer({
+    port: config.httpPort,
+    metrics,
+    isReady,
+    status: () => ({
+      state: denylist.state,
+      degraded: [...denylist.degraded],
+      denylistAgeMs: denylist.ageMs(),
+      chains: config.chains.map((c) => ({ key: c.key, eid: c.eid, dvn: c.dvn })),
+    }),
+    pending: () => ({
+      pending: checkpoint.deferredEntries().map(([key, r]) => ({
+        key,
+        ...r,
+        approved: checkpoint.isApproved(r.payloadHash),
+      })),
+    }),
+    logger,
+  })
   lifecycle.onShutdown(() => http.close())
   lifecycle.install()
 
@@ -150,13 +183,17 @@ async function main(): Promise<void> {
         await scanChainOnce({
           chain,
           provider: providers[chain.key],
-          confirmations: config.confirmations,
+          confirmations: config.scanConfirmations,
           scanWindow: SCAN_WINDOW,
           scanChunk: SCAN_CHUNK,
           state: () => denylist.state,
           checkpoint,
           scanAssigned: (from, to) => scanJobAssigned(providers[chain.key], chain.dvn, from, to),
-          scanPackets: (from, to) => scanPacketSent(providers[chain.key], chain.endpoint, from, to),
+          scanPackets: (from, to) =>
+            scanPacketSent(providers[chain.key], chain.endpoint, from, to, (payloadHash, reason) => {
+              metrics.packetsUnparsed.inc({ chain: chain.key })
+              logger.debug({ chain: chain.key, payloadHash, reason }, 'skipped undecodable packet (not an OFT transfer)')
+            }),
           scanApproved: (from, to) => scanPacketApproved(providers[chain.key], chain.dvn, from, to),
           handlePacket: (p) =>
             verifyPacket(p, {
@@ -165,6 +202,8 @@ async function main(): Promise<void> {
               verify: actions.verify,
               commit: actions.commit,
               recordVerdict: actions.recordVerdict,
+              execute: actions.execute,
+              commitState: actions.commitState,
               emitVerdictFor,
               checkpoint,
               metrics,
@@ -176,7 +215,7 @@ async function main(): Promise<void> {
         })
       } catch (err) {
         // Per-chain isolation: one chain's RPC failure must not stop the others.
-        logger.error({ chain: chain.key, err: (err as Error).message }, 'scan failed; will retry next tick')
+        logger.error({ chain: chain.key, err: briefError(err) }, 'scan failed; will retry next tick')
       }
     }
 
@@ -190,13 +229,18 @@ async function main(): Promise<void> {
           verify: actions.verify,
           commit: actions.commit,
           recordVerdict: actions.recordVerdict,
+          execute: actions.execute,
+          commitState: actions.commitState,
+          // Only the deferred pass needs this: a packet is screened live before anyone could have
+          // rejected it, so the check would be a wasted read on the hot path.
+          abandoned: actions.abandoned,
           emitVerdictFor,
           checkpoint,
           metrics,
           logger,
         })
       } catch (err) {
-        logger.error({ err: (err as Error).message }, 'deferred-queue pass failed; will retry next tick')
+        logger.error({ err: briefError(err) }, 'deferred-queue pass failed; will retry next tick')
       }
     }
 

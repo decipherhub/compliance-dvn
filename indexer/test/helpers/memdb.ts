@@ -73,6 +73,9 @@ export async function seedFixture(
       from: string
       to: string
       value: string
+      /** 'bridge' for a cross-chain send, whose `to` lives on `dstChain`. */
+      kind?: string
+      dstChain?: string
     }>
     minimums?: Array<{ chain?: string; token: string; min: string }>
   },
@@ -88,8 +91,8 @@ export async function seedFixture(
   for (const e of rows.edges ?? []) {
     i++
     await db.query(
-      `INSERT INTO edges (chain, block_number, tx_hash, log_index, token, from_addr, to_addr, value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      `INSERT INTO edges (chain, block_number, tx_hash, log_index, token, from_addr, to_addr, value, kind, dst_chain)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         e.chain ?? 'baseSepolia',
         e.block ?? 100,
@@ -99,6 +102,8 @@ export async function seedFixture(
         e.from.toLowerCase(),
         e.to.toLowerCase(),
         e.value,
+        e.kind ?? 'transfer',
+        e.dstChain ?? null,
       ],
     )
   }

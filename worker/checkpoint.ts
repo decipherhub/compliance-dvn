@@ -23,6 +23,12 @@ export interface DeferredRecord {
   payloadHash: string
   dstEid: number
   header: string
+  /**
+   * The pieces `lzReceive` needs. Optional because records written before the worker drove delivery
+   * do not have them — such a packet is still verified and committed, just not delivered by us.
+   */
+  guid?: string
+  message?: string
   /** Source chain the packet came from — the deferred queue is scanned across all chains. */
   srcChainKey: string
   /** Parties re-screened on every re-evaluation: sender, receiver, OFT recipient. */
@@ -83,6 +89,15 @@ export class Checkpoint {
     this.feedVersions[source] = version
   }
 
+  /**
+   * Upper bound on remembered processed keys. This set is a dedupe cache, not a ledger — the
+   * on-chain events are the ledger. A settled packet can only be presented again by manually
+   * rewinding the block cursor, and a rewind reaching keys old enough to have been evicted
+   * costs a redundant (idempotent) re-verification, not a wrong decision. Unbounded, the set
+   * would grow with every packet ever screened and be rewritten to disk on each save.
+   */
+  private static readonly MAX_PROCESSED = 50_000
+
   getLastBlock(chain: string): number { return this.lastBlock[chain] ?? 0 }
   setLastBlock(chain: string, block: number): void { this.lastBlock[chain] = block }
   isProcessed(key: string): boolean { return this.processedSet.has(key) }
@@ -91,6 +106,12 @@ export class Checkpoint {
   markProcessed(key: string): void {
     this.processedSet.add(key)
     this.deferredMap.delete(key)
+    // Evict oldest-first (Set preserves insertion order).
+    while (this.processedSet.size > Checkpoint.MAX_PROCESSED) {
+      const oldest = this.processedSet.values().next().value
+      if (oldest === undefined) break
+      this.processedSet.delete(oldest)
+    }
   }
 
   defer(key: string, record: DeferredRecord): void { this.deferredMap.set(key, record) }
