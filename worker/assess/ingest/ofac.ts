@@ -1,4 +1,4 @@
-import { Denylist } from '../store'
+import { RiskStore } from '../store'
 
 const OFAC_ETH_URL =
   'https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/lists/sanctioned_addresses_ETH.json'
@@ -23,9 +23,11 @@ const defaultFetch: Fetcher = async (url) => {
   return res.text()
 }
 
-export async function ingestOfac(dl: Denylist, fetcher: Fetcher = defaultFetch): Promise<number> {
+export async function ingestOfac(store: RiskStore, fetcher: Fetcher = defaultFetch): Promise<number> {
   const body = await fetcher(OFAC_ETH_URL)
   const addrs = parseOfacList(body)
-  for (const a of addrs) dl.add(a, 'ofac', 'OFAC SDN digital currency address (ETH)')
+  for (const a of addrs) {
+    store.upsert({ subject: a, subjectType: 'address', labels: ['sanctions'], source: 'ofac' })
+  }
   return addrs.length
 }

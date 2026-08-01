@@ -1,5 +1,6 @@
 import type { Logger } from 'pino'
 import type { Metrics } from './metrics'
+import { briefError } from './errors'
 
 /** Minimal shape of a submitted transaction we depend on (a subset of ethers' response). */
 export interface SubmittedTx {
@@ -38,10 +39,19 @@ const RETRIABLE_CODES = new Set([
 ])
 const NONCE_CODES = new Set(['NONCE_EXPIRED'])
 const RETRIABLE_MESSAGE = /(timeout|timed out|underpriced|replacement|nonce|econnreset|etimedout|socket hang up|503|502|rate.?limit)/i
+/**
+ * A gas estimate can fail two ways that ethers reports under one code.
+ *
+ * `UNPREDICTABLE_GAS_LIMIT` covers both a flaky node and a call the chain simply rejects. Only the
+ * first is worth retrying: a reverting call reverts at any gas price, so escalating gas through
+ * every attempt just spends the backoff and reports a determined outcome as a transient one.
+ */
+const REVERTED = /execution reverted/i
 
 /** True for transient infra/gas/nonce errors that a bump-and-retry can plausibly fix. */
 export function isRetriableTxError(err: unknown): boolean {
   const e = err as { code?: string; message?: string }
+  if (e?.code === 'UNPREDICTABLE_GAS_LIMIT' && REVERTED.test(e.message ?? '')) return false
   if (e?.code && RETRIABLE_CODES.has(e.code)) return true
   if (e?.code === 'CALL_EXCEPTION') return false // on-chain revert — retrying won't help
   return !!e?.message && RETRIABLE_MESSAGE.test(e.message)
@@ -102,7 +112,7 @@ export class TxSender {
           // Drop the cached nonce so the next send re-syncs from the chain.
           this.trackedNonce = undefined
           log.error(
-            { err: (err as Error).message, attempt, retriable, nonce },
+            { err: briefError(err), attempt, retriable, nonce },
             'transaction send failed',
           )
           throw err
@@ -113,7 +123,7 @@ export class TxSender {
         }
         const backoff = this.baseBackoffMs * 2 ** attempt
         log.warn(
-          { err: (err as Error).message, attempt, nextNonce: nonce, gasPrice: gasPrice.toString(), backoffMs: backoff },
+          { err: briefError(err), attempt, nextNonce: nonce, gasPrice: gasPrice.toString(), backoffMs: backoff },
           'transaction send failed; retrying with higher gas',
         )
         await this.sleep(backoff)

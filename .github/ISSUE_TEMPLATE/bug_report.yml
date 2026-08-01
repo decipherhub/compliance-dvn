@@ -25,8 +25,7 @@ body:
         - Contracts (contracts/ComplianceDVN.sol, on-chain veto)
         - Worker — service (worker/service.ts, verify/commit/veto loop)
         - Worker — assess / risk engine (worker/assess/)
-        - Worker — tracker (worker/tracker/)
-        - CLI (pnpm cli assess / trace)
+        - Demo dashboard (demo/dashboard/)
         - Deploy / wiring (hardhat tasks, layerzero.config.ts)
         - Build / tooling / CI
         - Documentation

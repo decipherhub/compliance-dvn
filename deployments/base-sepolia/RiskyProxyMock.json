@@ -1,0 +1,111 @@
+{
+  "address": "0xeBb646C8eD3A06d37bd779C994A9d479abC788d3",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_admin",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_implementation",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "admin",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "a",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "implementation",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "i",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "transactionHash": "0x9920c73b138937aeb753560720118dba07235f7793c65dfcf8d79a7fb991c33e",
+  "receipt": {
+    "to": null,
+    "from": "0x8583894d0e57e42abb83039537f314490038efa0",
+    "contractAddress": "0xeBb646C8eD3A06d37bd779C994A9d479abC788d3",
+    "transactionIndex": 8,
+    "gasUsed": "149244",
+    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "transactionHash": "0x9920c73b138937aeb753560720118dba07235f7793c65dfcf8d79a7fb991c33e",
+    "logs": [],
+    "blockNumber": 44883456,
+    "cumulativeGasUsed": "2288971",
+    "status": 1,
+    "byzantium": true
+  },
+  "args": [
+    "0x000000000000000000000000000000000000dEaD",
+    "0x8583894d0e57e42abb83039537f314490038efa0"
+  ],
+  "numDeployments": 1,
+  "solcInputHash": "91f67dad93f3438967ecce8dd1aaa287",
+  "metadata": "{\"compiler\":{\"version\":\"0.8.22+commit.4fc1097e\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_admin\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"_implementation\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"admin\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"a\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"implementation\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"i\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"The engine reads the two EIP-1967 slots directly (see `assess/providers/contract.ts`):      an implementation slot that is set means the code behind this address can change, and the      admin slot names whoever can change it. It then looks that admin up in the risk store \\u2014      a flagged admin is the signal, because today's clean code says nothing about tomorrow's      if a sanctioned party can swap it out.      The slots are written straight to storage rather than by deploying a real proxy: what is      being demonstrated is the engine's reading of them, and a forwarding proxy would add a      delegatecall path with nothing to delegate to.\",\"kind\":\"dev\",\"methods\":{\"constructor\":{\"params\":{\"_admin\":\"The address to present as able to upgrade this contract. Point it at an        address the operator has flagged (e.g. one in TEST_DENYLIST) for the check to fire.\",\"_implementation\":\"Any non-zero address; its only job is to make the proxy slot set.\"}}},\"stateVariables\":{\"SLOT_ADMIN\":{\"details\":\"keccak256(\\\"eip1967.proxy.admin\\\") - 1\"},\"SLOT_IMPLEMENTATION\":{\"details\":\"keccak256(\\\"eip1967.proxy.implementation\\\") - 1\"}},\"title\":\"RiskyProxyMock\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{\"admin()\":{\"notice\":\"The admin as stored in the EIP-1967 slot, for anyone reading it the easy way.\"},\"implementation()\":{\"notice\":\"The implementation as stored in the EIP-1967 slot.\"}},\"notice\":\"A testnet decoy that looks like an upgradeable proxy controlled by a flagged address,         for exercising the risk engine's `contract_admin_risk` check.\",\"version\":1}},\"settings\":{\"compilationTarget\":{\"contracts/mocks/RiskyProxyMock.sol\":\"RiskyProxyMock\"},\"evmVersion\":\"paris\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\",\"useLiteralContent\":true},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[]},\"sources\":{\"contracts/mocks/RiskyProxyMock.sol\":{\"content\":\"// SPDX-License-Identifier: MIT\\npragma solidity ^0.8.22;\\n\\n/// @title RiskyProxyMock\\n/// @notice A testnet decoy that looks like an upgradeable proxy controlled by a flagged address,\\n///         for exercising the risk engine's `contract_admin_risk` check.\\n/// @dev The engine reads the two EIP-1967 slots directly (see `assess/providers/contract.ts`):\\n///      an implementation slot that is set means the code behind this address can change, and the\\n///      admin slot names whoever can change it. It then looks that admin up in the risk store \\u2014\\n///      a flagged admin is the signal, because today's clean code says nothing about tomorrow's\\n///      if a sanctioned party can swap it out.\\n///\\n///      The slots are written straight to storage rather than by deploying a real proxy: what is\\n///      being demonstrated is the engine's reading of them, and a forwarding proxy would add a\\n///      delegatecall path with nothing to delegate to.\\ncontract RiskyProxyMock {\\n    /// @dev keccak256(\\\"eip1967.proxy.implementation\\\") - 1\\n    bytes32 private constant SLOT_IMPLEMENTATION =\\n        0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;\\n    /// @dev keccak256(\\\"eip1967.proxy.admin\\\") - 1\\n    bytes32 private constant SLOT_ADMIN = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;\\n\\n    /// @param _admin The address to present as able to upgrade this contract. Point it at an\\n    ///        address the operator has flagged (e.g. one in TEST_DENYLIST) for the check to fire.\\n    /// @param _implementation Any non-zero address; its only job is to make the proxy slot set.\\n    constructor(address _admin, address _implementation) {\\n        require(_admin != address(0), \\\"zero admin\\\");\\n        require(_implementation != address(0), \\\"zero implementation\\\");\\n        assembly {\\n            sstore(SLOT_ADMIN, _admin)\\n            sstore(SLOT_IMPLEMENTATION, _implementation)\\n        }\\n    }\\n\\n    /// @notice The admin as stored in the EIP-1967 slot, for anyone reading it the easy way.\\n    function admin() external view returns (address a) {\\n        assembly {\\n            a := sload(SLOT_ADMIN)\\n        }\\n    }\\n\\n    /// @notice The implementation as stored in the EIP-1967 slot.\\n    function implementation() external view returns (address i) {\\n        assembly {\\n            i := sload(SLOT_IMPLEMENTATION)\\n        }\\n    }\\n}\\n\",\"keccak256\":\"0xf54c10753cd83e2a3f3b58cac49ba5a37eb0314ff51853ce443fc5917cc42f03\",\"license\":\"MIT\"}},\"version\":1}",
+  "bytecode": "0x608060405234801561001057600080fd5b5060405161024838038061024883398101604081905261002f91610135565b6001600160a01b0382166100775760405162461bcd60e51b815260206004820152600a6024820152693d32b9379030b236b4b760b11b60448201526064015b60405180910390fd5b6001600160a01b0381166100cd5760405162461bcd60e51b815260206004820152601360248201527f7a65726f20696d706c656d656e746174696f6e00000000000000000000000000604482015260640161006e565b7fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103919091557f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc55610168565b80516001600160a01b038116811461013057600080fd5b919050565b6000806040838503121561014857600080fd5b61015183610119565b915061015f60208401610119565b90509250929050565b60d2806101766000396000f3fe6080604052348015600f57600080fd5b506004361060325760003560e01c80635c60da1b146037578063f851a440146076575b600080fd5b7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc545b6040516001600160a01b03909116815260200160405180910390f35b7fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d610354605a56fea2646970667358221220db4d640c5bd6b171ede814a8f22af946c7a8d98b7ba3fb5d90d436509788860864736f6c63430008160033",
+  "deployedBytecode": "0x6080604052348015600f57600080fd5b506004361060325760003560e01c80635c60da1b146037578063f851a440146076575b600080fd5b7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc545b6040516001600160a01b03909116815260200160405180910390f35b7fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d610354605a56fea2646970667358221220db4d640c5bd6b171ede814a8f22af946c7a8d98b7ba3fb5d90d436509788860864736f6c63430008160033",
+  "devdoc": {
+    "details": "The engine reads the two EIP-1967 slots directly (see `assess/providers/contract.ts`):      an implementation slot that is set means the code behind this address can change, and the      admin slot names whoever can change it. It then looks that admin up in the risk store —      a flagged admin is the signal, because today's clean code says nothing about tomorrow's      if a sanctioned party can swap it out.      The slots are written straight to storage rather than by deploying a real proxy: what is      being demonstrated is the engine's reading of them, and a forwarding proxy would add a      delegatecall path with nothing to delegate to.",
+    "kind": "dev",
+    "methods": {
+      "constructor": {
+        "params": {
+          "_admin": "The address to present as able to upgrade this contract. Point it at an        address the operator has flagged (e.g. one in TEST_DENYLIST) for the check to fire.",
+          "_implementation": "Any non-zero address; its only job is to make the proxy slot set."
+        }
+      }
+    },
+    "stateVariables": {
+      "SLOT_ADMIN": {
+        "details": "keccak256(\"eip1967.proxy.admin\") - 1"
+      },
+      "SLOT_IMPLEMENTATION": {
+        "details": "keccak256(\"eip1967.proxy.implementation\") - 1"
+      }
+    },
+    "title": "RiskyProxyMock",
+    "version": 1
+  },
+  "userdoc": {
+    "kind": "user",
+    "methods": {
+      "admin()": {
+        "notice": "The admin as stored in the EIP-1967 slot, for anyone reading it the easy way."
+      },
+      "implementation()": {
+        "notice": "The implementation as stored in the EIP-1967 slot."
+      }
+    },
+    "notice": "A testnet decoy that looks like an upgradeable proxy controlled by a flagged address,         for exercising the risk engine's `contract_admin_risk` check.",
+    "version": 1
+  },
+  "storageLayout": {
+    "storage": [],
+    "types": null
+  }
+}

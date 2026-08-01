@@ -12,7 +12,9 @@ contract MyOFTMock is MyOFT {
         address _delegate
     ) MyOFT(_name, _symbol, _lzEndpoint, _delegate) {}
 
-    function mint(address _to, uint256 _amount) public {
+    // Now identical to the inherited MyOFT.mint, kept as an explicit override so the mock's
+    // intent stays visible at the point tests read it.
+    function mint(address _to, uint256 _amount) public override {
         _mint(_to, _amount);
     }
 }

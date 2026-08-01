@@ -76,8 +76,7 @@ need them for live deploy/wire/demo flows (see the README).
 | `contracts/`          | `ComplianceDVN.sol` (the thin on-chain DVN) and friends                           |
 | `worker/service.ts`   | Always-on worker: watches `JobAssigned`, verifies/commits or vetoes               |
 | `worker/assess/`      | Chain-independent risk engine — `assess()` / `combine()` over the merged denylist |
-| `worker/tracker/`     | Tier 1 observation-only route tracker                                             |
-| `worker/cli.ts`       | `pnpm cli assess <addr>` / `pnpm cli trace <txHash>`                              |
+| `demo/`               | Demo assets: dashboard, decoy contracts, mint script (see `demo/README.md`)       |
 | `deploy/`, `tasks/`   | Hardhat deploy scripts and operator tasks                                         |
 | `test/`               | Foundry (`*.t.sol`) and Hardhat/Vitest tests                                      |
 | `layerzero.config.ts` | DVN wiring (required DVN, per-chain ULN config)                                   |

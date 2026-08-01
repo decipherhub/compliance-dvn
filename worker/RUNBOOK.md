@@ -13,7 +13,7 @@ on any uncertainty it withholds rather than risk approving a sanctioned transfer
 - `runtime/tx-sender.ts` — nonce tracking, gas escalation, bounded retries.
 - `runtime/http.ts` — `/healthz` `/readyz` `/metrics`.
 - `runtime/lifecycle.ts` — graceful shutdown.
-- `service.ts` — composes the above into the poll loop. `cli.ts` — operator one-shots.
+- `service.ts` — composes the above into the poll loop.
 
 ## States (see `dvn_ready`, `dvn_halted`)
 
@@ -30,11 +30,12 @@ the halt is screened once the worker recovers. Expect a short backlog spike on r
 ## Run locally
 
 ```bash
-cp worker/.env.example worker/.env   # fill PRIVATE_KEY + DVN_* addresses
-pnpm worker                          # or: cd worker && pnpm start
-pnpm cli -- assess 0x<address>
-pnpm cli -- verify baseSepolia 0x<txhash> --dry-run
+cp worker/.env.example worker/.env   # fill OPERATOR_PRIVATE_KEY + DVN_* addresses
+pnpm worker                          # from the repo root; or cd worker, then pnpm start
 ```
+
+Held packets, screening results, and owner actions (approve / reject) live in the demo dashboard —
+`demo/dashboard/` — or the worker's own HTTP surface (`/status`, `/pending`).
 
 Health: `curl localhost:9090/healthz` · `:9090/readyz` · `:9090/metrics`.
 
@@ -44,12 +45,14 @@ Health: `curl localhost:9090/healthz` · `:9090/readyz` · `:9090/metrics`.
 docker build -t ghcr.io/your-org/compliance-dvn-worker:<tag> worker/
 # Create the Secret out-of-band (never commit it):
 kubectl create secret generic compliance-dvn-worker-secrets \
-  --from-literal=PRIVATE_KEY=0x... \
+  --from-literal=OPERATOR_PRIVATE_KEY=0x... \
   --from-literal=DVN_BASE_SEPOLIA=0x... --from-literal=DVN_OPTIMISM_SEPOLIA=0x...
 kubectl apply -k worker/deploy/k8s/          # set the image tag in kustomization.yaml first
 ```
 
-Import `worker/deploy/grafana-dashboard.json` into Grafana (pick your Prometheus datasource).
+Import `worker/deploy/grafana-dashboard.json` into Grafana (pick your Prometheus datasource). For a
+local stack, `docker compose --profile observability up -d` in `indexer/` provisions this dashboard
+too, scraping the worker at `host.docker.internal:9090`.
 
 > **Single replica only.** The checkpoint file and local nonce tracking assume one writer.
 > The Deployment pins `replicas: 1` with `strategy: Recreate`. Do not scale up.
@@ -87,7 +90,7 @@ sanctions sources and RPC endpoints.
 1. Fund the new operator address on every enabled chain.
 2. Ensure the new address is authorized to call `submitVerification` on each ComplianceDVN
    (and `commitVerification` on the ReceiveUln, which is permissionless).
-3. Update the `PRIVATE_KEY` in the Secret; `kubectl rollout restart deploy/compliance-dvn-worker`.
+3. Update `OPERATOR_PRIVATE_KEY` in the Secret; `kubectl rollout restart deploy/compliance-dvn-worker`.
 4. Local nonce tracking re-syncs from the chain on the next send — no manual nonce reset needed.
 
 ## Recovery / data

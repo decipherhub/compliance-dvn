@@ -1,0 +1,36 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "contracts/mocks/RiskyProxyMock.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.22;\n\n/// @title RiskyProxyMock\n/// @notice A testnet decoy that looks like an upgradeable proxy controlled by a flagged address,\n///         for exercising the risk engine's `contract_admin_risk` check.\n/// @dev The engine reads the two EIP-1967 slots directly (see `assess/providers/contract.ts`):\n///      an implementation slot that is set means the code behind this address can change, and the\n///      admin slot names whoever can change it. It then looks that admin up in the risk store —\n///      a flagged admin is the signal, because today's clean code says nothing about tomorrow's\n///      if a sanctioned party can swap it out.\n///\n///      The slots are written straight to storage rather than by deploying a real proxy: what is\n///      being demonstrated is the engine's reading of them, and a forwarding proxy would add a\n///      delegatecall path with nothing to delegate to.\ncontract RiskyProxyMock {\n    /// @dev keccak256(\"eip1967.proxy.implementation\") - 1\n    bytes32 private constant SLOT_IMPLEMENTATION =\n        0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;\n    /// @dev keccak256(\"eip1967.proxy.admin\") - 1\n    bytes32 private constant SLOT_ADMIN = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;\n\n    /// @param _admin The address to present as able to upgrade this contract. Point it at an\n    ///        address the operator has flagged (e.g. one in TEST_DENYLIST) for the check to fire.\n    /// @param _implementation Any non-zero address; its only job is to make the proxy slot set.\n    constructor(address _admin, address _implementation) {\n        require(_admin != address(0), \"zero admin\");\n        require(_implementation != address(0), \"zero implementation\");\n        assembly {\n            sstore(SLOT_ADMIN, _admin)\n            sstore(SLOT_IMPLEMENTATION, _implementation)\n        }\n    }\n\n    /// @notice The admin as stored in the EIP-1967 slot, for anyone reading it the easy way.\n    function admin() external view returns (address a) {\n        assembly {\n            a := sload(SLOT_ADMIN)\n        }\n    }\n\n    /// @notice The implementation as stored in the EIP-1967 slot.\n    function implementation() external view returns (address i) {\n        assembly {\n            i := sload(SLOT_IMPLEMENTATION)\n        }\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "paris",
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode",
+          "evm.methodIdentifiers",
+          "metadata",
+          "devdoc",
+          "userdoc",
+          "storageLayout",
+          "evm.gasEstimates"
+        ],
+        "": [
+          "ast"
+        ]
+      }
+    },
+    "metadata": {
+      "useLiteralContent": true
+    }
+  }
+}

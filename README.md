@@ -64,8 +64,8 @@ direct-hit lookup over a denylist merged from four sources:
 veto: blocked if any party is flagged. The live denylist built to 101 entries during
 the demo.
 
-`worker/tracker/` adds the Tier 1 observation-only tracker. `cli trace <txHash>`
-reconstructs a route via the LayerZero Scan API and colors each endpoint with `assess()`.
+Screening results, held packets, and owner actions are all surfaced in the demo dashboard
+(`demo/dashboard/`), which links each verdict to its LayerZero Scan route.
 
 ## Deployed contracts
 
@@ -94,14 +94,11 @@ npx hardhat lz:deploy  --ci --networks base-sepolia,optimism-sepolia --tags Comp
 npx hardhat lz:oapp:wire --oapp-config layerzero.config.ts --ci
 npx hardhat dvn:status --network base-sepolia          # sanity
 
-# Run the worker (always-on) + send demos
+# Run the worker (always-on)
 pnpm worker                                            # screens both chains, verifies/commits or vetoes
-npx hardhat demo:send --network optimism-sepolia --to <clean_addr>   --dst base   # delivers
-npx hardhat demo:send --network optimism-sepolia --to $TEST_DENYLIST --dst base   # vetoed
 
-# One-shot CLI
-pnpm cli assess <address>
-pnpm cli trace  <txHash>        # Tier 1 route + risk coloring
+# Demo dashboard (MetaMask sends, owner review, sanctions/graph views)
+cd demo/dashboard && python serve.py                   # http://localhost:8080 — see demo/README.md
 ```
 
 ## Tests
@@ -111,8 +108,9 @@ Foundry (31): `ComplianceDVN` unit tests (fee, job, operator-gating, admin) and 
 one reverts `commitVerification` with `LZ_ULN_Verifying`, so the recipient balance
 stays 0.
 
-Vitest (16): `assess()`/`combine()`, the 81-byte header and OFT-message decoders, the
-`JobAssigned` assignment filter, the durable checkpoint, and the tracker transform.
+Vitest (worker + indexer): `assess()`/`combine()`, the 81-byte header and OFT-message decoders,
+the `JobAssigned` assignment filter, the durable checkpoint, the deferred queue, the signed feed,
+and the 3-hop proximity graph.
 
 ## CI / CD
 
@@ -160,11 +158,11 @@ verifying other OApps' packets on the shared endpoint.
 contracts/ComplianceDVN.sol   ComplianceDVN.t.sol + ComplianceDvnVeto.t.sol (veto proof)
 contracts/ToyOFT.sol          demo OFT
 deploy/                       hardhat-deploy scripts
+demo/                         demo assets: dashboard, decoy contracts, mint script (demo/README.md)
 layerzero.config.ts           requiredDVNs = our DVN, both directions
-tasks/                        dvn:status, demo:send
+tasks/                        dvn:status, dvn:preflight, dvn:verify-wiring
 worker/assess/                Tier 0 risk engine (OFAC + OpenSanctions + mixers + test)
-worker/chain/                 header/message decoders, PacketSent scanner, verify/commit
-worker/tracker/               Tier 1 LayerZero-Scan tracker
-worker/service.ts             always-on watcher (fail-closed)   worker/cli.ts  one-shot
+worker/chain/                 header/message decoders, PacketSent scanner
+worker/service.ts             always-on watcher (fail-closed)
 docs/superpowers/             design spec + implementation plan
 ```

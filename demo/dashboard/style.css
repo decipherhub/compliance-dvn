@@ -1,0 +1,465 @@
+/*
+ * Pretendard Variable, self-hosted (SIL OFL 1.1 — see fonts/LICENSE-Pretendard.txt).
+ *
+ * The variable cut rather than static weights: the UI asks for 400 through 700 including
+ * in-between values, and one axis renders those exactly instead of snapping to the nearest file.
+ * Self-hosted rather than from a CDN so the dashboard keeps working offline, like the rest of it.
+ */
+@font-face {
+  font-family: 'Pretendard Variable';
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url('./fonts/PretendardVariable.woff2') format('woff2-variations');
+}
+
+/*
+ * Line-ruled on true black.
+ *
+ * Space is divided by hairlines, not by filled cards — nothing has a corner radius, and panels
+ * carry rules rather than backgrounds. Fills are reserved for state (a verdict, a health badge),
+ * so on a dense compliance screen the only thing that draws the eye is a decision.
+ */
+:root {
+  --bg: #000;
+  --raise: #0a0a0a;
+  --line: #232323;
+  --line-strong: #3a3a3a;
+  --fg: #ececec;
+  --muted: #8a8a8a;
+  --ok: #35c05a;
+  --warn: #d9a021;
+  --hold: #a97bf5;
+  --bad: #ff5449;
+  --accent: #6cb0ff;
+}
+
+* { box-sizing: border-box; border-radius: 0 !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  /* One face covers Hangul and Latin, so mixed text no longer falls back per-glyph into two
+     mismatched weights — which is what made "피드 v121" look like two fonts. */
+  font: 14px/1.65 'Pretendard Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  word-break: keep-all; /* wrap Korean at word boundaries, not mid-word */
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Tabular figures in tables only.
+ *
+ * Applied to the whole page it widened every narrow digit — Pretendard's proportional "1" is much
+ * narrower than its tabular one, so a lone 1 in a stat tile sat in a gap of its own side bearings
+ * and read as the wrong font. Columns still need the alignment; prose and headline numbers do not.
+ */
+th, td { font-variant-numeric: tabular-nums; }
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+  padding: 13px 22px;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/*
+ * No `text-transform: uppercase` anywhere below.
+ *
+ * The UI is Korean with Latin identifiers embedded in it (testUSDT, mint(), 피드 v121). Uppercase
+ * does nothing to Hangul and mangles those identifiers into TESTUSDT and V121. Wide letter-spacing
+ * is likewise held back: it separates Hangul syllables that should read as one word.
+ */
+header h1 {
+  font-size: 14px;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: .4px;
+}
+header h1 span { color: var(--muted); font-weight: 400; }
+
+/*
+ * The nav spans the header's full height: negative margins cancel the header's vertical padding,
+ * so the dividers between tabs run edge to edge instead of floating in the middle of the bar.
+ */
+#nav {
+  display: flex;
+  align-self: stretch;
+  margin: -13px 0;
+}
+#nav a {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 0 16px;
+  font-weight: 550;
+  border-left: 1px solid var(--line);
+}
+#nav a:last-child { border-right: 1px solid var(--line); }
+#nav a:hover { color: var(--fg); }
+#nav a.on { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+
+#health { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; }
+
+/* Connected wallet: who signs on the first line, what they hold on the second. */
+.wallet { display: flex; flex-direction: column; gap: 3px; }
+
+/* Service state as a name plus a lamp; the detail lives on the hover title. */
+.lamp { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; cursor: help; }
+.dot {
+  width: 8px;
+  height: 8px;
+  /* Overrides the global radius reset — a status lamp is the one thing that should be round. */
+  border-radius: 50% !important;
+  background: var(--line-strong);
+}
+.dot.ok { background: var(--ok); box-shadow: 0 0 6px rgba(53, 192, 90, .7); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 6px rgba(217, 160, 33, .6); }
+.dot.bad { background: var(--bad); box-shadow: 0 0 6px rgba(255, 84, 73, .6); }
+
+main { padding: 0 22px 40px; max-width: 1600px; margin: 0 auto; }
+
+/* ── headings ───────────────────────────────────────────────────────────── */
+
+h2 {
+  font-size: 13.5px;
+  margin: 0 0 5px;
+  font-weight: 700;
+  letter-spacing: .2px;
+  /* The help marker sits inside the heading; keep it on the text baseline, not stretched. */
+  display: flex;
+  align-items: center;
+}
+h3 {
+  font-size: 12px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+/* ── panels: ruled, not boxed ───────────────────────────────────────────── */
+
+.grid { display: grid; gap: 0; }
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
+/* 150px, not 210: inside a half-width card the third column no longer wraps to its own row —
+   which is what actually pushed 수량 out of line with the two selects beside it. */
+.grid.three { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 22px; }
+.grid.stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+
+/*
+ * A row of panels is one framed area: outer edges on both sides, a divider between columns.
+ *
+ * The frame goes on the grid rather than on each card. Per-card side borders would double up at
+ * every seam and leave the last column open on the right, which is what made the row read as a
+ * set of loose boxes instead of one region.
+ */
+.card {
+  border-top: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 18px 24px 26px 22px;
+}
+
+/* In a row, the frame belongs to the grid; the cards inside contribute only the dividers. */
+.grid.two,
+.grid.stats {
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.grid.two > .card,
+.grid.stats > .card { border-left: 0; border-right: 0; }
+.grid.two > .card:not(:first-child),
+.grid.stats > .card:not(:first-child) { border-left: 1px solid var(--line); }
+
+/* Nothing follows the last region, so it closes itself. */
+main > :last-child { border-bottom: 1px solid var(--line); }
+
+/* Stacked, there is no inner edge to divide — a left rule would be a stray vertical line. */
+@media (max-width: 1180px) {
+  .grid.two > .card:not(:first-child) { border-left: 0; }
+}
+.card.tight { padding: 14px 0 12px 22px; }
+
+/*
+ * Regions sit flush against each other, sharing one rule at every seam.
+ *
+ * A margin between them left the columns' vertical rules ending in mid-air with nothing closing
+ * them, and doubled the gap under the stat tiles. Flush, each region's top rule closes the one
+ * above it and the frame reads as continuous down the page.
+ */
+main > .card,
+main > .grid { margin-top: 0; }
+
+/* Proportional figures: these are read as words, not compared down a column. */
+.stat .value { font-size: 27px; font-weight: 600; line-height: 1.1; }
+.stat .label { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+
+/* ── form controls: underlined, not boxed ───────────────────────────────── */
+
+label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 14px 0 4px;
+  font-weight: 600;
+}
+
+input, select, textarea {
+  width: 100%;
+  padding: 7px 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.4;
+}
+input:focus, select:focus { outline: none; border-bottom-color: var(--accent); }
+input::placeholder { color: #4a4a4a; }
+
+/*
+ * Strip the native select chrome.
+ *
+ * Left alone, a select carries its own border and intrinsic height, so it sat a few pixels off the
+ * inputs beside it — the row of 출발 / 도착 / 수량 never lined up. Same box model now, with the
+ * dropdown arrow drawn as a background so nothing reintroduces a border.
+ */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 18px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 9px) calc(50% + 1px), calc(100% - 4px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+select option { background: var(--raise); }
+
+/* Grid cells whose label heights differ would still misalign; anchor the control to the bottom. */
+.field { display: flex; flex-direction: column; justify-content: flex-end; }
+
+/* Fixed advance for hex only — addresses and hashes are compared by eye, column by column. */
+.mono, input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; }
+
+button {
+  padding: 7px 16px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: .2px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--fg); color: #000; }
+button:disabled { opacity: .35; cursor: not-allowed; }
+button.ghost { border-color: var(--line-strong); color: var(--muted); }
+button.ghost:hover:not(:disabled) { background: transparent; border-color: var(--fg); color: var(--fg); }
+button.danger { border-color: var(--bad); color: var(--bad); }
+button.danger:hover:not(:disabled) { background: var(--bad); color: #000; }
+button.sm { padding: 3px 10px; font-size: 12px; }
+
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.row.end { justify-content: flex-end; }
+.spacer { flex: 1; }
+
+/* ── state markers ──────────────────────────────────────────────────────── */
+
+/*
+ * State and labels are both bordered rectangles — no left accent bars anywhere.
+ *
+ * A bar reads as a divider in a layout already built from rules, so state was competing with the
+ * lines that organise the page. A box says "this is a value" instead. Colour still separates a
+ * verdict from a mere label.
+ *
+ * These carry Korean readings, so they inherit the body face: hex needs fixed advance, words do
+ * not, and Hangul in a Latin monospace stack falls back per glyph into a mismatched weight.
+ */
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.ok { color: var(--ok); border-color: rgba(53, 192, 90, .5); }
+.badge.warn { color: var(--warn); border-color: rgba(217, 160, 33, .5); }
+.badge.hold { color: var(--hold); border-color: rgba(169, 123, 245, .55); }
+.badge.bad { color: var(--bad); border-color: rgba(255, 84, 73, .55); }
+.badge.muted { color: var(--muted); border-color: var(--line); }
+
+/*
+ * Copy button. Two overlapping squares drawn in CSS rather than an icon font or an inline SVG per
+ * row — there is one of these on every address, and the shape is two rectangles.
+ */
+.copy {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: 7px;
+  border: 0;
+  background: transparent;
+  vertical-align: -5px;
+  cursor: pointer;
+}
+.copy::before, .copy::after {
+  content: '';
+  position: absolute;
+  border: 1px solid var(--muted);
+}
+.copy::before { width: 8px; height: 9px; left: 3px; top: 3px; }
+.copy::after { width: 8px; height: 9px; left: 7px; top: 6px; background: var(--bg); }
+.copy:hover { background: transparent; }
+.copy:hover::before, .copy:hover::after { border-color: var(--fg); }
+.copy.failed::before, .copy.failed::after { border-color: var(--bad); }
+/* Confirmed state: a tick, so the click is acknowledged without a toast. */
+.copy.copied::before { border-color: var(--ok); }
+.copy.copied::after {
+  border-color: var(--ok);
+  border-top: 0;
+  border-right: 0;
+  width: 9px;
+  height: 5px;
+  left: 5px;
+  top: 5px;
+  background: transparent;
+  transform: rotate(-45deg);
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 2px 3px 2px 0;
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.chip-risk { border-color: rgba(255, 84, 73, .55); color: #ff9b93; }
+
+.status { margin-top: 14px; font-size: 13.5px; min-height: 20px; }
+.status.ok { color: var(--ok); }
+.status.err { color: var(--bad); }
+.status.busy { color: var(--warn); }
+
+.muted { color: var(--muted); }
+.right { text-align: right; }
+p.muted { font-size: 12.5px; max-width: 100ch; }
+
+/* ── help marker: rationale on demand ───────────────────────────────────── */
+
+.help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 8px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: help;
+  position: relative;
+  vertical-align: 1px;
+}
+.help::after { content: '?'; }
+.help:hover, .help:focus { border-color: var(--accent); color: var(--accent); outline: none; }
+
+.help-card {
+  /* Hidden rather than display:none so screen readers still reach the content. Shown instantly:
+     a fade would make the reveal depend on the compositor, and a dashboard gains nothing from
+     waiting 120ms to answer a question. */
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -8px;
+  z-index: 30;
+  /* Plain px, no nested min()/calc(): the engine here resolves `min(400px, calc(100vw - 60px))`
+     to 0 and collapses the card. A media query below handles narrow viewports instead. */
+  width: 400px;
+  padding: 13px 15px;
+  background: #050505;
+  border: 1px solid var(--line-strong);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  cursor: auto;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .85);
+}
+.help:hover .help-card, .help:focus .help-card { visibility: visible; opacity: 1; }
+.help-card p { margin: 0 0 8px; }
+.help-card p:last-child { margin: 0; }
+.help-card .mono { font-size: 12px; }
+
+/* A marker near the right edge opens leftward, so the card cannot run off-screen. */
+.help.left .help-card { left: auto; right: -8px; }
+
+@media (max-width: 520px) {
+  .help-card { width: 280px; }
+}
+
+/* ── tables ─────────────────────────────────────────────────────────────── */
+
+/* Rows run about 10% larger than the surrounding chrome: the lists are what gets read on a
+   projector or in a video frame, so they carry a little more weight than the panel titles. */
+.table-wrap { overflow-x: auto; margin-top: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+th, td { text-align: left; padding: 6px 17px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom-color: var(--line-strong);
+}
+tbody tr:hover td { background: var(--raise); }
+/* Sits under a table whose last row already drew a rule, so the pager adds none of its own. */
+.row.pager { gap: 10px; padding-top: 10px; font-size: 13px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── packet tracker ─────────────────────────────────────────────────────── */
+
+.track { display: flex; flex-direction: column; }
+/* No left accent bar: the state badge in the head already names the outcome. */
+.track-item {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0;
+}
+.track-head { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.steps { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 13.5px; color: var(--muted); flex-wrap: wrap; }
+.steps .step { font-size: 13.5px; }
+.steps .step.done { color: var(--fg); }
+.steps .sep { opacity: .35; }
+
+/* ── graph ──────────────────────────────────────────────────────────────── */
+
+#graph { width: 100%; height: 620px; background: var(--bg); border: 1px solid var(--line); margin-top: 14px; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; margin-top: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: 0; }
+.node-label { font-size: 11px; fill: var(--fg); font-family: ui-monospace, Menlo, monospace; pointer-events: none; }
+.edge { stroke: #333; stroke-width: 1.3px; }
+.edge.tainted { stroke: var(--bad); stroke-width: 2px; }
+/* Dashed: the two ends of a bridged transfer are not on the same chain. */
+.edge.bridged { stroke-dasharray: 5 4; }
+
+details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }

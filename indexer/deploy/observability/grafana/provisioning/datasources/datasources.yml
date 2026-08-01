@@ -1,0 +1,28 @@
+# Datasources are given FIXED uids so the dashboards can pin their datasource variables to them.
+# Without that, a datasource-type variable loads empty and every panel reads "No data" until the
+# operator picks one by hand — which looks exactly like a broken dashboard.
+apiVersion: 1
+
+datasources:
+  - name: DVN Prometheus
+    uid: dvn-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  - name: DVN Postgres
+    uid: dvn-postgres
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: ${POSTGRES_USER}
+    database: ${POSTGRES_DB}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      # Local compose network, no TLS between containers.
+      sslmode: disable
+      postgresVersion: 1600
+    editable: false

@@ -8,11 +8,20 @@ describe('createMetrics', () => {
     const m = createMetrics()
     m.up.set(1)
     m.ready.set(0)
-    m.vetoes.inc({ chain: 'baseSepolia', tag: 'ofac' })
+    m.decisions.inc({ chain: 'baseSepolia', action: 'block' })
     const text = await m.registry.metrics()
     expect(text).toMatch(/dvn_up\{service="compliance-dvn"\} 1/)
     expect(text).toMatch(/dvn_ready\{service="compliance-dvn"\} 0/)
-    expect(text).toMatch(/dvn_vetoes_total\{[^}]*chain="baseSepolia"[^}]*tag="ofac"[^}]*\} 1/)
+    expect(text).toMatch(/dvn_decisions_total\{[^}]*chain="baseSepolia"[^}]*action="block"[^}]*\} 1/)
+  })
+
+  it('tracks held packets and observed approvals', async () => {
+    const m = createMetrics()
+    m.pendingPackets.set({ action: 'manual-review' }, 2)
+    m.approvals.inc({ chain: 'optimismSepolia' })
+    const text = await m.registry.metrics()
+    expect(text).toMatch(/dvn_pending_packets\{[^}]*action="manual-review"[^}]*\} 2/)
+    expect(text).toMatch(/dvn_approvals_total\{[^}]*chain="optimismSepolia"[^}]*\} 1/)
   })
 
   it('tracks denylist gauges and refresh outcomes', async () => {

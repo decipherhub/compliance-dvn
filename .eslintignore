@@ -15,3 +15,9 @@ deployments
 # Standalone Node 20 worker package: governed by its own toolchain
 # (worker/tsconfig.json typecheck + vitest), not the root Next.js eslint config.
 worker
+
+# Demo dashboard: plain browser-global scripts served statically — no modules, no Node,
+# so the root TS/Next config has nothing true to say about them.
+demo/dashboard
+# Checked-in compiled artifacts (see demo/README.md) — generated, not hand-authored.
+demo/prebuilt

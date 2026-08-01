@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compliance DVN — 그래프</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Compliance DVN</h1>
+  <nav id="nav"></nav>
+  <div id="health"></div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="row">
+      <h2 style="margin:0">전송 그래프 &amp; 제재 근접성<span id="help-graph"></span></h2>
+      <span class="spacer"></span>
+      <input id="focus" class="mono" placeholder="지갑 주소로 좁히기 (선택)" style="max-width:340px">
+      <button class="ghost sm" id="apply">적용</button>
+      <button class="ghost sm" id="clear">전체 보기</button>
+    </div>
+
+    <svg id="graph"></svg>
+    <div class="legend">
+      <span><i style="background:#ff5449"></i>제재 시드</span>
+      <span><i style="background:#ff8a3d"></i>1홉</span>
+      <span><i style="background:#d9a021"></i>2홉</span>
+      <span><i style="background:#c9c247"></i>3홉</span>
+      <span><i style="background:#5a5a5a"></i>노출 없음</span>
+      <span><i style="background:#6cb0ff"></i>데모 지갑</span>
+      <span>빨간 엣지 = 시드에 직접 도달한 전송</span>
+      <span>점선 = 크로스체인 전송</span>
+    </div>
+  </section>
+
+  <div class="grid two">
+    <section class="card">
+      <h2><span id="detail-title">선택한 주소</span><span id="help-detail"></span></h2>
+      <div id="detail"><p class="muted">노드를 클릭하면 상세 정보가 표시됩니다.</p></div>
+    </section>
+    <section class="card">
+      <h2>라벨이 붙은 주소<span id="help-labelled"></span></h2>
+      <div id="labelled"></div>
+    </section>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="lib.js"></script>
+<script>
+mountHeader('graph.html')
+
+// Rationale per panel, revealed on hover instead of occupying the layout.
+$('#help-graph').innerHTML = helpMark(`
+  <p>각 엣지는 실제 testUSDT ERC-20 전송입니다. 노드 색은 제재 시드와의 거리를 나타냅니다 —
+     빨강(시드)에서 주황 · 앰버 · 올리브로 멀어집니다.</p>
+  <p>거리가 중요합니다: 1홉 라벨은 70점, 3홉 라벨은 25점이므로, 멀리 있는 연결은 거부 근거가 아니라
+     정황 정보입니다.</p>
+  <p>발행/소각(제로 어드레스) 엣지는 표시하지 않습니다 — 모든 보유자를 하나로 잇는 허브가 되어, 엔진이
+     의도적으로 걷지 않는 경로를 있는 것처럼 보이게 만들기 때문입니다.</p>`)
+$('#help-detail').innerHTML = helpMark(`
+  <p>노드를 클릭하면 그 주소의 시드 여부 · 근접성 라벨 · 관련 전송을 보여줍니다.</p>
+  <p>시드 본인은 즉시 차단 대상이지만, 근접성만 있는 주소는 최대 수동 검토까지만 갑니다.</p>`)
+$('#help-labelled').innerHTML = helpMark(`
+  <p>시드로부터 3홉 이내에 있는 주소와, 그중 최단 거리를 보여줍니다.</p>
+  <p>주소를 클릭하면 왼쪽 패널에서 상세 정보를 확인할 수 있습니다.</p>`)
+
+/** Depth -> node colour. Mirrors the weight ladder: closer is hotter. */
+const DEPTH_COLOR = { seed: '#ff5449', 1: '#ff8a3d', 2: '#d9a021', 3: '#c9c247' }
+const PLAIN = '#5a5a5a'
+const NAMED = '#6cb0ff'
+
+const depthOf = (labels) => {
+  if (labels.some((l) => /_3hop/.test(l))) return 3
+  if (labels.some((l) => /_2hop/.test(l))) return 2
+  if (labels.length) return 1
+  return undefined
+}
+
+let state = { edges: [], seeds: new Map(), labels: new Map(), focus: '', supply: 0 }
+
+/**
+ * Mint/burn edges are hidden, matching the proximity engine.
+ *
+ * Drawn, the zero address becomes a hub tying every holder to every other and implies paths that
+ * the engine deliberately refuses to walk. Cross-chain sends are not lost by hiding it: the indexer
+ * records them as `bridge` edges between the real sender and recipient, drawn dashed below.
+ */
+const ZERO = '0x' + '0'.repeat(40)
+
+async function load() {
+  const focus = state.focus
+  const [edgesRes, seedsRes, proxRes] = await Promise.all([
+    indexerApi(`/api/edges?limit=400${focus ? `&address=${focus}` : ''}`),
+    indexerApi('/api/seeds?limit=5000'),
+    indexerApi('/api/proximity'),
+  ])
+
+  const all = edgesRes.edges
+  state.edges = all.filter((e) => e.from_addr !== ZERO && e.to_addr !== ZERO)
+  state.supply = all.length - state.edges.length
+  state.seeds = new Map()
+  for (const s of seedsRes.seeds) {
+    const existing = state.seeds.get(s.subject) ?? []
+    state.seeds.set(s.subject, [...existing, s.label])
+  }
+  state.labels = new Map(proxRes.labelled.map((l) => [l.subject, l.labels]))
+
+  renderGraph()
+  renderLabelled(proxRes.labelled)
+}
+
+function renderLabelled(labelled) {
+  $('#labelled').innerHTML = table(
+    labelled,
+    [
+      ['주소', (r) => `<a href="#" data-pick="${r.subject}">${labelOf(r.subject) ?? short(r.subject)}</a>`],
+      ['최단 거리', (r) => `<span class="badge ${depthOf(r.labels) === 1 ? 'bad' : 'warn'}">${depthOf(r.labels)}홉</span>`],
+      ['라벨', (r) => reasonChips(r.labels)],
+    ],
+    '아직 시드로부터 3홉 이내에 있는 주소가 없습니다.',
+  )
+  $$('[data-pick]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); select(a.dataset.pick) }))
+}
+
+/**
+ * Force-directed layout, hand-rolled.
+ *
+ * A physics library would be another CDN dependency for perhaps forty nodes; repulsion plus
+ * spring attraction over a fixed number of ticks settles this size of graph well enough, and it
+ * keeps the page self-contained.
+ */
+function layout(nodes, links, width, height) {
+  // Rest length from the space available per node, so the graph spreads to fill the canvas
+  // instead of huddling in the middle of a larger one. Repulsion follows from it.
+  const spacing = Math.max(120, Math.min(280, Math.sqrt((width * height) / Math.max(nodes.length, 4)) * 0.55))
+  const repulsion = spacing * spacing * 1.9
+
+  const pos = new Map()
+  nodes.forEach((id, i) => {
+    // Deterministic ring start: same graph lays out the same way on every reload.
+    const angle = (i / nodes.length) * Math.PI * 2
+    pos.set(id, { x: width / 2 + Math.cos(angle) * width * 0.3, y: height / 2 + Math.sin(angle) * height * 0.3 })
+  })
+
+  for (let tick = 0; tick < 320; tick++) {
+    const force = new Map(nodes.map((id) => [id, { x: 0, y: 0 }]))
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = pos.get(nodes[i]), b = pos.get(nodes[j])
+        let dx = a.x - b.x, dy = a.y - b.y
+        let d2 = dx * dx + dy * dy
+        if (d2 < 1) { dx = (i - j) || 1; dy = 1; d2 = 1 }
+        const rep = repulsion / d2
+        const d = Math.sqrt(d2)
+        force.get(nodes[i]).x += (dx / d) * rep
+        force.get(nodes[i]).y += (dy / d) * rep
+        force.get(nodes[j]).x -= (dx / d) * rep
+        force.get(nodes[j]).y -= (dy / d) * rep
+      }
+    }
+    for (const { source, target } of links) {
+      const a = pos.get(source), b = pos.get(target)
+      if (!a || !b) continue
+      const dx = b.x - a.x, dy = b.y - a.y
+      const d = Math.max(1, Math.hypot(dx, dy))
+      const pull = (d - spacing) * 0.012
+      force.get(source).x += (dx / d) * pull * d * 0.1
+      force.get(source).y += (dy / d) * pull * d * 0.1
+      force.get(target).x -= (dx / d) * pull * d * 0.1
+      force.get(target).y -= (dy / d) * pull * d * 0.1
+    }
+    const damp = 0.55 * (1 - tick / 320)
+    for (const id of nodes) {
+      const p = pos.get(id), f = force.get(id)
+      p.x = Math.min(width - 70, Math.max(70, p.x + f.x * damp * 0.02))
+      p.y = Math.min(height - 50, Math.max(50, p.y + f.y * damp * 0.02))
+    }
+  }
+  return pos
+}
+
+function renderGraph() {
+  const svg = $('#graph')
+  const width = svg.clientWidth || 1600
+  // Read the rendered height rather than repeating the CSS value, so the layout fills the box
+  // instead of drifting out of it whenever the stylesheet changes.
+  const height = svg.clientHeight || 760
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+
+  const ids = new Set()
+  for (const e of state.edges) { ids.add(e.from_addr); ids.add(e.to_addr) }
+  const nodes = [...ids]
+
+  if (!nodes.length) {
+    // Say whether the filter is what emptied the view: with a focus set, "no edges" means "none for
+    // that address", which is a different thing to fix than "nothing indexed at all".
+    const scope = state.focus ? `${labelOf(state.focus) ?? short(state.focus)} 주소에 연결된 ` : ''
+    const why = state.supply
+      ? `${scope}전송이 없습니다. 발행/소각 기록만 ${state.supply}건 있어 표시에서 제외했습니다 — 지갑 간 전송이 있어야 그래프가 생깁니다.`
+      : `${scope}전송이 아직 수집되지 않았습니다 — 전송 탭의 "같은 체인 내 전송"으로 지갑 간 전송을 만들면 그래프가 생성됩니다.`
+    svg.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="node-label">${why}</text>`
+    return
+  }
+
+  // Collapse repeated transfers between the same pair into one link, keeping the total.
+  const linkMap = new Map()
+  for (const e of state.edges) {
+    const key = `${e.from_addr}->${e.to_addr}`
+    const prev = linkMap.get(key)
+    if (prev) {
+      prev.count++
+      prev.total = (BigInt(prev.total) + BigInt(e.value)).toString()
+      if (e.kind === 'bridge') prev.bridged++
+    } else {
+      linkMap.set(key, {
+        source: e.from_addr,
+        target: e.to_addr,
+        count: 1,
+        total: e.value,
+        chain: e.chain,
+        bridged: e.kind === 'bridge' ? 1 : 0,
+      })
+    }
+  }
+  const links = [...linkMap.values()]
+  const pos = layout(nodes, links, width, height)
+
+  const colorOf = (id) => {
+    if (state.seeds.has(id)) return DEPTH_COLOR.seed
+    const d = depthOf(state.labels.get(id) ?? [])
+    if (d) return DEPTH_COLOR[d]
+    return labelOf(id) ? NAMED : PLAIN
+  }
+
+  const edgeSvg = links
+    .map((l) => {
+      const a = pos.get(l.source), b = pos.get(l.target)
+      const tainted = state.seeds.has(l.target) || state.seeds.has(l.source)
+      // Dashed when every transfer on the link crossed chains — the two ends are not on one chain.
+      const bridged = l.bridged === l.count
+      return `<line class="edge ${tainted ? 'tainted' : ''} ${bridged ? 'bridged' : ''}"
+        x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
+        marker-end="url(#arrow${tainted ? '-bad' : ''})"><title>${l.source} → ${l.target}
+전송 ${l.count}건${l.bridged ? ` (크로스체인 ${l.bridged}건)` : ''}, 합계 ${fmtUnits(l.total)}</title></line>`
+    })
+    .join('')
+
+  const nodeSvg = nodes
+    .map((id) => {
+      const p = pos.get(id)
+      const isSeed = state.seeds.has(id)
+      const r = isSeed ? 13 : state.labels.has(id) ? 11 : 8
+      const name = labelOf(id) ?? short(id)
+      return `<g class="node" data-id="${id}" style="cursor:pointer">
+        <circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${colorOf(id)}" stroke="#000" stroke-width="2">
+          <title>${id}</title>
+        </circle>
+        <text class="node-label" x="${p.x}" y="${p.y - r - 6}" text-anchor="middle">${name}</text>
+      </g>`
+    })
+    .join('')
+
+  svg.innerHTML = `<defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#333"/>
+      </marker>
+      <marker id="arrow-bad" viewBox="0 0 10 10" refX="20" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff5449"/>
+      </marker>
+    </defs>${edgeSvg}${nodeSvg}`
+
+  $$('#graph .node').forEach((g) => (g.onclick = () => select(g.dataset.id)))
+}
+
+/** Inspect one address: its labels, its seed status, and every edge it touches. */
+async function select(address) {
+  const id = address.toLowerCase()
+  $('#detail-title').innerHTML = `선택: ${labelOf(id) ?? short(id)}`
+  const labels = state.labels.get(id) ?? []
+  const seedLabels = state.seeds.get(id) ?? []
+  const touching = state.edges.filter((e) => e.from_addr === id || e.to_addr === id)
+
+  const verdictNote = seedLabels.length
+    ? `<p class="status err">이 주소는 제재 시드 목록에 있습니다 (${seedLabels.join(', ')}).
+       이 주소가 당사자인 패킷은 즉시 거부됩니다 — 점수 100, 판정 block.</p>`
+    : labels.length
+      ? `<p class="status busy">시드로부터 ${depthOf(labels)}홉 거리입니다. 파생된 근접성만으로는 자동
+         거부가 일어나지 않습니다: 최대 수동 검토까지만 갑니다. 추론만으로 자금을 묶지 않는다는
+         원칙 때문입니다.</p>`
+      : '<p class="status ok">3홉 이내에서 발견된 노출이 없습니다.</p>'
+
+  $('#detail').innerHTML = `
+    <p class="mono" style="word-break:break-all">${id}</p>
+    <div class="row">${addrChip(id, { chain: 'baseSepolia' })}
+      ${seedLabels.map((l) => `<span class="chip chip-risk">${l}</span>`).join(' ')}
+      ${reasonChips(labels)}
+    </div>
+    ${verdictNote}
+    <h3>이 주소가 관련된 전송</h3>
+    ${table(
+      touching.slice(0, 25),
+      [
+        ['방향', (e) => (e.from_addr === id ? '<span class="badge warn">보냄</span>' : '<span class="badge muted">받음</span>')],
+        [
+          '상대방',
+          (e) => addrChip(e.from_addr === id ? e.to_addr : e.from_addr, { chain: e.kind === 'bridge' && e.from_addr === id ? e.dst_chain ?? e.chain : e.chain }),
+        ],
+        [
+          '경로',
+          (e) =>
+            e.kind === 'bridge'
+              ? `<span class="chip">크로스체인 → ${CHAINS[e.dst_chain]?.label ?? e.dst_chain ?? '미인덱스'}</span>`
+              : '<span class="muted">같은 체인</span>',
+        ],
+        ['수량', (e) => fmtUnits(e.value)],
+        ['시각', (e) => fmtTime(e.block_time)],
+        ['Tx', (e) => txLink(e.chain, e.tx_hash)],
+      ],
+      '이 주소가 관련된 전송이 없습니다.',
+    )}`
+}
+
+$('#apply').onclick = () => {
+  const v = $('#focus').value.trim().toLowerCase()
+  if (v && !/^0x[0-9a-f]{40}$/.test(v)) return alert('20바이트 주소 전체를 입력하거나, 입력란을 비우세요')
+  state.focus = v
+  load()
+}
+$('#clear').onclick = () => { $('#focus').value = ''; state.focus = ''; load() }
+window.addEventListener('resize', () => renderGraph())
+
+load().catch((e) => ($('#labelled').innerHTML = `<p class="status err">${e.message}</p>`))
+setInterval(() => load().catch(() => {}), 30000)
+</script>
+</body>
+</html>

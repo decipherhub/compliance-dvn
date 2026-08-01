@@ -1,0 +1,113 @@
+# Compliance DVN indexer: PostgreSQL + the indexer service.
+#
+#   cp .env.example .env   # fill in FEED_SIGNING_KEY and the DVN addresses
+#   docker compose up -d
+#
+# The feed is then served at http://localhost:9091/feed/latest.json — point the worker's
+# INDEXER_FEED_URL at it and add this instance's signer address to INDEXER_SIGNERS.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-indexer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-indexer}
+      POSTGRES_DB: ${POSTGRES_DB:-indexer}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Not published by default: only the indexer needs it. Uncomment to inspect with psql.
+    # ports:
+    #   - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-indexer} -d ${POSTGRES_DB:-indexer}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      # Wait for readiness, not just for the container to exist — migrations run at boot.
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-indexer}:${POSTGRES_PASSWORD:-indexer}@postgres:5432/${POSTGRES_DB:-indexer}
+      FEED_SIGNING_KEY: ${FEED_SIGNING_KEY:?FEED_SIGNING_KEY is required}
+      FEED_SOURCE: ${FEED_SOURCE:-trusted-indexer-a}
+      FEED_TTL_SEC: ${FEED_TTL_SEC:-7200}
+      FEED_REBUILD_MS: ${FEED_REBUILD_MS:-600000}
+      POLICY_VERSION: ${POLICY_VERSION:-2}
+      CHAINS_ENABLED: ${CHAINS_ENABLED:-}
+      DVN_BASE_SEPOLIA: ${DVN_BASE_SEPOLIA:-}
+      DVN_OPTIMISM_SEPOLIA: ${DVN_OPTIMISM_SEPOLIA:-}
+      RPC_URL_BASE_SEPOLIA: ${RPC_URL_BASE_SEPOLIA:-}
+      RPC_URL_OPTIMISM_SEPOLIA: ${RPC_URL_OPTIMISM_SEPOLIA:-}
+      TRACKED_TOKENS: ${TRACKED_TOKENS:-}
+      VERIFIER_URL: ${VERIFIER_URL-https://sourcify.dev/server}
+      VERIFY_BATCH: ${VERIFY_BATCH:-50}
+      VERIFY_TTL_SEC: ${VERIFY_TTL_SEC:-604800}
+      TOKEN_MINIMUMS: ${TOKEN_MINIMUMS:-}
+      POLL_MS: ${POLL_MS:-15000}
+      CONFIRMATIONS: ${CONFIRMATIONS:-5}
+      SCAN_BACKFILL_BLOCKS: ${SCAN_BACKFILL_BLOCKS:-5000}
+      SCAN_CHUNK_BLOCKS: ${SCAN_CHUNK_BLOCKS:-2000}
+      REORG_DEPTH: ${REORG_DEPTH:-32}
+      HTTP_PORT: 9091
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: ${NODE_ENV:-production}
+    ports:
+      - '${HTTP_PORT:-9091}:9091'
+
+  # ── Observability, opt-in ─────────────────────────────────────────────────
+  #
+  #   docker compose --profile observability up -d
+  #
+  # Behind a profile so the default `up` stays just postgres + indexer. Both services bind to
+  # 127.0.0.1 only: Grafana runs with anonymous viewer access for convenience, which is fine on
+  # loopback and would not be on a shared interface.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ['observability']
+    restart: unless-stopped
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    # The worker runs on the host, not in this project, so the container needs a route to it.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9092}:9090'
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ['observability']
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      # Datasource provisioning interpolates these, so Grafana needs the same DB credentials.
+      POSTGRES_USER: ${POSTGRES_USER:-indexer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-indexer}
+      POSTGRES_DB: ${POSTGRES_DB:-indexer}
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: 'false'
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Both dashboards are mounted straight from the repo, so they are always the committed
+      # version rather than a copy that has drifted in Grafana's own database.
+      - ./deploy/grafana-dashboard.json:/var/lib/grafana/dashboards/indexer.json:ro
+      - ./deploy/grafana-demo-dashboard.json:/var/lib/grafana/dashboards/demo.json:ro
+      - ../worker/deploy/grafana-dashboard.json:/var/lib/grafana/dashboards/worker.json:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - '127.0.0.1:${GRAFANA_PORT:-3000}:3000'
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:

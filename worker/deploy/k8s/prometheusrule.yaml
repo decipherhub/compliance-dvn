@@ -58,3 +58,27 @@ spec:
           annotations:
             summary: "Chain scan errors"
             description: "Repeated scan/RPC errors on {{ $labels.chain }}."
+        - alert: DvnSourceDegraded
+          expr: max by (source) (dvn_source_degraded) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Risk source unavailable — screening is degraded"
+            description: "{{ $labels.source }} has been unavailable for 15m. Verification continues on authoritative sources alone, so graph-derived labels (N-hop exposure, mixer proximity) are NOT being applied. Check dvn_feed_rejected_total for the reason."
+        - alert: DvnFeedRejected
+          expr: increase(dvn_feed_rejected_total[15m]) > 2
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Indexer feeds are being rejected"
+            description: "More than 2 feed rejections in 15m with reason '{{ $labels.reason }}'. untrusted_signer or bad_signature may indicate a misconfigured allowlist or a tampered feed; policy_mismatch means the indexer and worker are on different policy versions."
+        - alert: DvnPacketsAwaitingReview
+          expr: max(dvn_pending_packets{action="manual-review"}) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Packets awaiting owner approval"
+            description: "{{ $value }} packet(s) have been held for manual review for 30m. Nothing but an on-chain approvePacket call releases them — run `dvn-cli pending` and decide."

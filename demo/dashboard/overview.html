@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compliance DVN — 종합 현황</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Compliance DVN</h1>
+  <nav id="nav"></nav>
+  <div id="health"></div>
+</header>
+
+<main>
+  <div class="grid stats" id="stats"></div>
+
+  <section class="card">
+    <h2>판정 로그<span id="help-verdicts"></span></h2>
+    <div id="verdicts"></div>
+  </section>
+
+  <div class="grid two">
+    <section class="card">
+      <div class="row">
+        <h2 style="margin:0">제재 · 믹서 목록<span id="help-seeds"></span></h2>
+        <span class="spacer"></span>
+        <input id="seed-q" class="mono" placeholder="주소로 검색…" style="max-width:260px">
+      </div>
+      <div id="seeds"></div>
+    </section>
+
+    <section class="card">
+      <h2>감시 설정<span id="help-config"></span></h2>
+      <div id="config"></div>
+
+      <h3 style="margin-top:20px">worker에게 제공 중인 피드<span id="help-feed"></span></h3>
+      <div id="feed"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>근접성 라벨 (실시간)<span id="help-proximity"></span></h2>
+    <div id="proximity"></div>
+  </section>
+
+  <section class="card">
+    <h2>최근 토큰 전송 (그래프 엣지)<span id="help-edges"></span></h2>
+    <div id="edges"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="lib.js"></script>
+<script>
+mountHeader('overview.html')
+
+const stat = (value, label, kind = '') =>
+  `<div class="card stat tight"><div class="value ${kind}">${value}</div><div class="label">${label}</div></div>`
+
+// Rationale per panel, revealed on hover instead of occupying the layout.
+$('#help-verdicts').innerHTML = helpMark(`
+  <p>모든 <span class="mono">RiskVerdict</span> 이벤트를 사유 비트마스크를 라벨로 디코딩해 표시합니다.</p>
+  <p><span class="badge bad">차단</span> 행은 검증이 보류되었다는 뜻이며, 해당 패킷은 영구히 배달될 수
+     없습니다.</p>
+  <p>LayerZero 열에서 해당 메시지가 검증되지 않은 채 멈춰 있는 것을 직접 확인할 수 있습니다 (이
+     브라우저에서 보낸 전송에 한해 링크가 표시됩니다).</p>`)
+$('#help-seeds').innerHTML = helpMark(`
+  <p>OFAC + OpenSanctions + 큐레이션된 제재 믹서에서 가져온 시드입니다.</p>
+  <p>worker는 이 목록을 직접 보유하며, indexer는 이를 그래프의 시드 집합으로 사용합니다.</p>`)
+$('#help-config').innerHTML = helpMark(`
+  <p>이 배포가 무엇을 어디에서 심사하는지 보여줍니다.</p>
+  <p>최소값이 설정되지 않은 토큰은 inbound 근접성 라벨을 만들지 않습니다.</p>`)
+$('#help-feed').innerHTML = helpMark(`
+  <p>feed 키로 서명되며, worker의 서명자 allowlist로 검증됩니다.</p>
+  <p>재사용(replay)되거나 변조된 문서는 전체가 거부됩니다.</p>`)
+$('#help-proximity').innerHTML = helpMark(`
+  <p>현재 그래프에서 즉시 재계산한 결과입니다 — 재빌드 주기를 기다리지 않고 <b>다음</b> 피드가 발행할
+     내용을 보여줍니다.</p>
+  <p>가중치는 거리에 따라 낮아집니다: 1홉 70, 2홉 45, 3홉 25. 3홉 라벨은 단독으로는 어떤 행동도
+     일으키지 않습니다.</p>`)
+$('#help-edges').innerHTML = helpMark(`
+  <p>추적 대상 토큰의 ERC-20 <span class="mono">Transfer</span> 이벤트입니다.</p>
+  <p>모든 근접성 라벨이 이 엣지들에서 파생됩니다.</p>`)
+
+let allSeeds = []
+
+/** The list runs to a couple of hundred entries; a page of ten keeps it readable and scannable. */
+const SEED_PAGE_SIZE = 10
+let seedPage = 0
+
+function renderSeeds() {
+  const q = $('#seed-q').value.trim().toLowerCase()
+  const rows = q ? allSeeds.filter((s) => s.subject.includes(q)) : allSeeds
+  const pages = Math.max(1, Math.ceil(rows.length / SEED_PAGE_SIZE))
+  // A shrinking result set (or a new search) can leave the cursor past the end.
+  seedPage = Math.min(Math.max(0, seedPage), pages - 1)
+  const from = seedPage * SEED_PAGE_SIZE
+
+  $('#seeds').innerHTML =
+    `<p class="muted" style="font-size:12px">전체 ${allSeeds.length}건 중 ${rows.length}건` +
+    `${rows.length ? ` · ${from + 1}–${Math.min(from + SEED_PAGE_SIZE, rows.length)}번째` : ''}</p>` +
+    table(
+      rows.slice(from, from + SEED_PAGE_SIZE),
+      [
+        ['주소', (r) => addrChip(r.subject, { link: false }) + copyBtn(r.subject)],
+        ['라벨', (r) => `<span class="chip chip-risk" title="${r.label}">${labelKo(r.label)}</span>`],
+        ['출처', (r) => `<span class="badge muted">${r.source}</span>`],
+      ],
+      '일치하는 시드가 없습니다.',
+    ) +
+    (rows.length > SEED_PAGE_SIZE
+      ? `<div class="row pager">
+          <button class="ghost sm" id="seed-prev" ${seedPage === 0 ? 'disabled' : ''}>‹ 이전</button>
+          <span class="muted">${seedPage + 1} / ${pages}</span>
+          <button class="ghost sm" id="seed-next" ${seedPage >= pages - 1 ? 'disabled' : ''}>다음 ›</button>
+        </div>`
+      : '')
+
+  const step = (d) => () => {
+    seedPage += d
+    renderSeeds()
+  }
+  if ($('#seed-prev')) $('#seed-prev').onclick = step(-1)
+  if ($('#seed-next')) $('#seed-next').onclick = step(1)
+}
+$('#seed-q').oninput = () => {
+  seedPage = 0 // a new query starts at the top of its own results
+  renderSeeds()
+}
+
+async function load() {
+  // Status + stats
+  try {
+    const s = await indexerApi('/api/status')
+    const { verdicts } = await indexerApi('/api/verdicts?limit=1000')
+    const blocked = verdicts.filter((v) => v.action === 3).length
+    const held = verdicts.filter((v) => v.action === 2).length
+    const allowed = verdicts.filter((v) => v.action === 0).length
+    $('#stats').innerHTML = [
+      stat(s.seeds, '제재 시드'),
+      stat(s.feed ? s.feed.entries : 0, '피드 주시 대상'),
+      stat(allowed, '통과한 패킷'),
+      stat(blocked, '차단된 패킷'),
+      stat(held, '수동 검토 회부'),
+      stat(`v${s.policyVersion}`, '정책 버전'),
+    ].join('')
+
+    $('#config').innerHTML = table(
+      s.chains.map((c) => ({ ...c, min: (s.tokenMinimums ?? []).find((m) => m.chain === c.key) })),
+      [
+        ['체인', (r) => `${CHAINS[r.key]?.label ?? r.key} <span class="muted">(eid ${r.eid})</span>`],
+        ['DVN', (r) => addrChip(r.dvn, { chain: r.key })],
+        ['추적 토큰', (r) => Object.keys(TOKENS).map((t) => addrChip(tokenAt(t, r.key), { chain: r.key })).join('<br>')],
+        ['Inbound 최소값', (r) => (r.min ? `${fmtUnits(r.min.minValue)} <span class="muted">토큰</span>` : '<span class="badge warn">미설정 — inbound 라벨 비활성</span>')],
+      ],
+    )
+
+    $('#feed').innerHTML = s.feed
+      ? table(
+          [s.feed],
+          [
+            ['버전', (f) => `<b>v${f.version}</b>`],
+            ['엔트리', (f) => f.entries],
+            ['정책', (f) => `v${f.policyVersion}`],
+            ['생성', (f) => fmtTime(f.generatedAt)],
+            ['만료', (f) => fmtTime(f.expiresAt)],
+          ],
+        )
+      : '<p class="muted">아직 발행된 피드가 없습니다.</p>'
+  } catch (e) {
+    $('#stats').innerHTML = `<p class="status err">indexer에 연결할 수 없습니다 (${e.message})</p>`
+  }
+
+  // Verdict log
+  try {
+    const { verdicts } = await indexerApi('/api/verdicts?limit=100')
+    // The indexer records a verdict's own transaction; the send it judged is only knowable from
+    // what this browser sent, so the LayerZero column resolves through that store.
+    const sent = sentByPayload()
+    $('#verdicts').innerHTML = table(
+      verdicts,
+      [
+        ['시각', (r) => fmtTime(r.block_time)],
+        ['판정', (r) => actionBadge(r.action)],
+        ['점수', (r) => r.score],
+        ['사유', (r) => reasonChips(decodeReasons(r.reason_mask))],
+        ['Payload', (r) => `<span class="mono" title="${r.payload_hash}">${short(r.payload_hash)}</span>`],
+        ['체인', (r) => CHAINS[r.chain]?.label ?? r.chain],
+        ['Tx', (r) => txLink(r.chain, r.tx_hash)],
+        ['LayerZero', (r) => lzLink(sent.get(r.payload_hash)?.txHash, '메시지 보기')],
+        ['증거 해시', (r) => `<span class="mono muted" title="${r.evidence_hash}">${short(r.evidence_hash)}</span>`],
+      ],
+      '아직 기록된 판정이 없습니다 — 패킷을 전송하면 생성됩니다.',
+    )
+  } catch (e) {
+    $('#verdicts').innerHTML = `<p class="status err">${e.message}</p>`
+  }
+
+  // Seeds
+  try {
+    allSeeds = (await indexerApi('/api/seeds?limit=5000')).seeds
+    renderSeeds()
+  } catch (e) {
+    $('#seeds').innerHTML = `<p class="status err">${e.message}</p>`
+  }
+
+  // Proximity
+  try {
+    const { labelled } = await indexerApi('/api/proximity')
+    $('#proximity').innerHTML = table(
+      labelled,
+      [
+        ['주소', (r) => addrChip(r.subject, { chain: 'baseSepolia' }) + copyBtn(r.subject)],
+        ['라벨', (r) => reasonChips(r.labels)],
+      ],
+      '아직 시드로부터 3홉 이내에 있는 주소가 없습니다. 제재 주소로 토큰을 보내면 생성됩니다.',
+    )
+  } catch (e) {
+    $('#proximity').innerHTML = `<p class="status err">${e.message}</p>`
+  }
+
+  // Edges
+  try {
+    const { edges } = await indexerApi('/api/edges?limit=200')
+    // Mints and burns are not graph edges — the proximity engine excludes the zero address, and a
+    // cross-chain send is recorded as its own edge between the real parties. Left in, the burn and
+    // mint halves of every bridged transfer crowd out the row that actually says what happened.
+    const ZERO = '0x' + '0'.repeat(40)
+    const real = edges.filter((e) => e.from_addr !== ZERO && e.to_addr !== ZERO)
+    const rows = real.slice(0, 50)
+    const supply = edges.length - real.length
+    $('#edges').innerHTML =
+      (supply ? `<p class="muted" style="font-size:12px">발행/소각 ${supply}건은 엣지가 아니므로 제외했습니다.</p>` : '') +
+      table(
+      rows,
+      [
+        ['시각', (r) => fmtTime(r.block_time)],
+        ['체인', (r) => CHAINS[r.chain]?.label ?? r.chain],
+        ['보낸 주소', (r) => addrChip(r.from_addr, { chain: r.chain })],
+        // A bridge edge's recipient lives on the destination chain, so the chip must link there.
+        ['받은 주소', (r) => addrChip(r.to_addr, { chain: r.dst_chain ?? r.chain })],
+        [
+          '경로',
+          (r) =>
+            r.kind === 'bridge'
+              ? `<span class="chip" title="OFTSent + 패킷에서 복원한 크로스체인 전송">크로스체인 → ${
+                  CHAINS[r.dst_chain]?.label ?? r.dst_chain ?? '미인덱스 체인'
+                }</span>`
+              : '<span class="muted">같은 체인</span>',
+        ],
+        ['수량', (r) => fmtUnits(r.value)],
+        ['Tx', (r) => txLink(r.chain, r.tx_hash)],
+      ],
+      '아직 수집된 전송이 없습니다.',
+    )
+  } catch (e) {
+    $('#edges').innerHTML = `<p class="status err">${e.message}</p>`
+  }
+}
+
+load()
+setInterval(load, 20000)
+</script>
+</body>
+</html>

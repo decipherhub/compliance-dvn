@@ -12,22 +12,30 @@ export interface Metrics {
   readonly ready: Gauge
   readonly halted: Gauge<'reason'>
 
-  // Denylist
+  // Denylist / risk store
   readonly denylistSize: Gauge<'source'>
   readonly denylistAgeSeconds: Gauge
   readonly denylistRefreshTotal: Counter<'result'>
+  readonly sourceDegraded: Gauge<'source'>
+  readonly feedRejectedTotal: Counter<'reason'>
 
   // Scan progress
   readonly chainHeadBlock: Gauge<'chain'>
   readonly checkpointBlock: Gauge<'chain'>
   readonly packetsScanned: Counter<'chain'>
   readonly packetsAssigned: Counter<'chain'>
+  readonly packetsUnparsed: Counter<'chain'>
   readonly scanErrors: Counter<'chain'>
 
   // Verification outcomes
   readonly verifications: Counter<'chain' | 'result'>
   readonly commits: Counter<'chain' | 'result'>
-  readonly vetoes: Counter<'chain' | 'tag'>
+  readonly deliveries: Counter<'chain' | 'result'>
+  readonly decisions: Counter<'chain' | 'action'>
+  readonly screeningEvidence: Counter<'type' | 'source'>
+  readonly pendingPackets: Gauge<'action'>
+  readonly approvals: Counter<'chain'>
+  readonly verdictRecords: Counter<'chain' | 'result'>
   readonly txSendSeconds: Histogram<'chain' | 'op'>
 }
 
@@ -51,16 +59,40 @@ export function createMetrics(): Metrics {
     denylistSize: g('dvn_denylist_size', 'Denylist entries by source.', ['source']),
     denylistAgeSeconds: g('dvn_denylist_age_seconds', 'Seconds since the denylist was last built.'),
     denylistRefreshTotal: c('dvn_denylist_refresh_total', 'Denylist refresh attempts by result.', ['result']),
+    sourceDegraded: g('dvn_source_degraded', 'A tolerated source is unavailable (1) — its labels are absent.', ['source']),
+    feedRejectedTotal: c('dvn_feed_rejected_total', 'Indexer feeds rejected, by reason.', ['reason']),
 
     chainHeadBlock: g('dvn_chain_head_block', 'Latest block height observed per chain.', ['chain']),
     checkpointBlock: g('dvn_checkpoint_block', 'Last scanned block persisted per chain.', ['chain']),
     packetsScanned: c('dvn_packets_scanned_total', 'PacketSent events scanned per chain.', ['chain']),
     packetsAssigned: c('dvn_packets_assigned_total', 'Packets assigned to our DVN per chain.', ['chain']),
+    packetsUnparsed: c(
+      'dvn_packets_unparsed_total',
+      'PacketSent events skipped as undecodable — normally other OApps on the shared endpoint.',
+      ['chain'],
+    ),
     scanErrors: c('dvn_scan_errors_total', 'Scan/RPC errors per chain.', ['chain']),
 
     verifications: c('dvn_verifications_total', 'submitVerification calls by result.', ['chain', 'result']),
     commits: c('dvn_commits_total', 'commitVerification calls by result.', ['chain', 'result']),
-    vetoes: c('dvn_vetoes_total', 'Sanctioned transfers withheld, by tag.', ['chain', 'tag']),
+    deliveries: c(
+      'dvn_deliveries_total',
+      'lzReceive calls by result — the delivery the executor does not perform for custom DVNs.',
+      ['chain', 'result'],
+    ),
+    decisions: c('dvn_decisions_total', 'Risk verdicts by action (allow/delay/manual-review/block).', ['chain', 'action']),
+    screeningEvidence: c(
+      'dvn_screening_evidence_total',
+      'Evidence records observed while screening packets, by label type and source — which risk signals actually fire.',
+      ['type', 'source'],
+    ),
+    pendingPackets: g('dvn_pending_packets', 'Packets currently held, by action.', ['action']),
+    approvals: c('dvn_approvals_total', 'Owner approvals of held packets observed on-chain.', ['chain']),
+    verdictRecords: c(
+      'dvn_verdict_records_total',
+      'Separate recordVerdict transactions by result. A failure means the outcome was enforced but not recorded.',
+      ['chain', 'result'],
+    ),
     txSendSeconds: new Histogram({
       name: 'dvn_tx_send_seconds',
       help: 'On-chain transaction send+mine latency (seconds).',

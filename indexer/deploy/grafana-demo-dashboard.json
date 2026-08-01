@@ -1,0 +1,396 @@
+{
+  "title": "Compliance DVN — Demo",
+  "uid": "compliance-dvn-demo",
+  "tags": [
+    "compliance-dvn",
+    "demo"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "",
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "prom",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "DVN Prometheus",
+          "value": "dvn-prometheus"
+        },
+        "hide": 0
+      },
+      {
+        "name": "pg",
+        "label": "Postgres (indexer)",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "current": {
+          "text": "DVN Postgres",
+          "value": "dvn-postgres"
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sanctions seeds (indexer)",
+      "type": "stat",
+      "description": "OFAC + OpenSanctions + curated mixers, refreshed on the feed cadence.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS seeds FROM seed_labels",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Seeds by label",
+      "type": "piechart",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 4,
+        "y": 0
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT label, count(*) AS n FROM seed_labels GROUP BY label",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Worker denylist by source (live)",
+      "type": "piechart",
+      "description": "What the worker screens against right now. Empty until the worker (pnpm start) is running.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 9,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "dvn_denylist_size",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Feed version",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 14,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "max(indexer_feed_version)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Feed entries",
+      "type": "stat",
+      "description": "Graph-derived watchlist entries currently served to the worker.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 17,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "max(indexer_feed_entries)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Worker READY",
+      "type": "stat",
+      "description": "1 = verifying. 0/no data = worker down or HALTED (fail-closed).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "max(dvn_ready)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Sanctions & mixer seed list",
+      "type": "table",
+      "description": "The seed set the graph is grown from. The worker additionally holds these first-hand.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT subject AS address, label, source FROM seed_labels ORDER BY label, subject",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Feed watchlist (labels served to the worker)",
+      "type": "table",
+      "description": "Entries of the latest signed feed: addresses within 3 hops of a seed, plus unverified contracts.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e->>'address' AS address,\n  array_to_string(ARRAY(SELECT json_array_elements_text(e->'labels')), ', ') AS labels\nFROM (SELECT json_array_elements((document::json)->'entries') AS e\n        FROM feeds ORDER BY version DESC LIMIT 1) t\nORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Verdict log — action, score, decoded reasons",
+      "type": "table",
+      "description": "Every on-chain RiskVerdict, with the reason bitmask decoded back to labels.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 14,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(b.block_time) AS time, v.chain,\n  CASE v.action WHEN 0 THEN 'allow' WHEN 1 THEN 'delay' WHEN 2 THEN 'manual-review' WHEN 3 THEN 'block' END AS action, v.score,\n  NULLIF(concat_ws(', ',\n    CASE WHEN mod(div(v.reason_mask, 1::numeric), 2) = 1 THEN 'sanctions' END,\n    CASE WHEN mod(div(v.reason_mask, 2::numeric), 2) = 1 THEN 'sanctioned_mixer' END,\n    CASE WHEN mod(div(v.reason_mask, 4::numeric), 2) = 1 THEN 'scam_token' END,\n    CASE WHEN mod(div(v.reason_mask, 8::numeric), 2) = 1 THEN 'operator_deny' END,\n    CASE WHEN mod(div(v.reason_mask, 16::numeric), 2) = 1 THEN 'sanctions_1hop' END,\n    CASE WHEN mod(div(v.reason_mask, 32::numeric), 2) = 1 THEN 'sanctions_1hop_inbound' END,\n    CASE WHEN mod(div(v.reason_mask, 64::numeric), 2) = 1 THEN 'mixer_exposure' END,\n    CASE WHEN mod(div(v.reason_mask, 128::numeric), 2) = 1 THEN 'fake_stablecoin_suspect' END,\n    CASE WHEN mod(div(v.reason_mask, 256::numeric), 2) = 1 THEN 'honeypot_suspect' END,\n    CASE WHEN mod(div(v.reason_mask, 512::numeric), 2) = 1 THEN 'contract_admin_risk' END,\n    CASE WHEN mod(div(v.reason_mask, 1024::numeric), 2) = 1 THEN 'unverified_contract' END,\n    CASE WHEN mod(div(v.reason_mask, 2048::numeric), 2) = 1 THEN 'upgradeable_proxy' END,\n    CASE WHEN mod(div(v.reason_mask, 4096::numeric), 2) = 1 THEN 'contract_check_unavailable' END,\n    CASE WHEN mod(div(v.reason_mask, 8192::numeric), 2) = 1 THEN 'token_check_unavailable' END,\n    CASE WHEN mod(div(v.reason_mask, 16384::numeric), 2) = 1 THEN 'owner_approved' END,\n    CASE WHEN mod(div(v.reason_mask, 32768::numeric), 2) = 1 THEN 'sanctions_2hop' END,\n    CASE WHEN mod(div(v.reason_mask, 65536::numeric), 2) = 1 THEN 'sanctions_3hop' END,\n    CASE WHEN mod(div(v.reason_mask, 131072::numeric), 2) = 1 THEN 'sanctions_2hop_inbound' END,\n    CASE WHEN mod(div(v.reason_mask, 262144::numeric), 2) = 1 THEN 'sanctions_3hop_inbound' END,\n    CASE WHEN mod(div(v.reason_mask, 524288::numeric), 2) = 1 THEN 'mixer_exposure_2hop' END,\n    CASE WHEN mod(div(v.reason_mask, 1048576::numeric), 2) = 1 THEN 'mixer_exposure_3hop' END), '') AS reasons,\n  v.payload_hash, v.tx_hash\nFROM risk_verdicts v\nJOIN blocks b ON b.chain = v.chain AND b.number = v.block_number\nORDER BY b.block_time DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Verdicts by action",
+      "type": "piechart",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 5,
+        "x": 14,
+        "y": 15
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE action WHEN 0 THEN 'allow' WHEN 1 THEN 'delay' WHEN 2 THEN 'manual-review' WHEN 3 THEN 'block' END AS action, count(*) AS n FROM risk_verdicts GROUP BY action",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Blocked (veto)",
+      "type": "stat",
+      "description": "Packets refused outright. Withholding verification IS the enforcement.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 19,
+        "y": 15
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS blocked FROM risk_verdicts WHERE action = 3",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Awaiting owner approval",
+      "type": "stat",
+      "description": "manual-review verdicts with no PacketApproved yet. Release with: dvn-cli approve",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 19,
+        "y": 20
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT v.payload_hash) AS awaiting FROM risk_verdicts v\nWHERE v.action = 2 AND NOT EXISTS\n  (SELECT 1 FROM packet_approvals a WHERE a.payload_hash = v.payload_hash)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Owner approvals",
+      "type": "table",
+      "description": "Human releases of held packets — the owner key, never the worker's.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(b.block_time) AS time, a.chain, a.payload_hash, a.approver, a.tx_hash\nFROM packet_approvals a JOIN blocks b ON b.chain = a.chain AND b.number = a.block_number\nORDER BY b.block_time DESC LIMIT 20",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Decisions by action (worker live)",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 25
+      },
+      "targets": [
+        {
+          "expr": "sum by (action) (rate(dvn_decisions_total[5m]))",
+          "legendFormat": "{{action}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Risk evidence observed (worker live)",
+      "type": "timeseries",
+      "description": "Which risk signals actually fired while screening packets.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 25
+      },
+      "targets": [
+        {
+          "expr": "sum by (type) (increase(dvn_screening_evidence_total[15m]))",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

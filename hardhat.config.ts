@@ -20,6 +20,9 @@ const accounts = process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : []
 const config: HardhatUserConfig = {
     paths: {
         cache: 'cache/hardhat',
+        // Demo-only deploys (decoy tokens, risky proxy) live under demo/ so the main tree stays
+        // clean; hardhat-deploy still discovers them, and their tags select them individually.
+        deploy: ['deploy', 'demo/deploy'],
     },
     solidity: {
         compilers: [

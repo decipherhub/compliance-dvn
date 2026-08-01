@@ -1,0 +1,721 @@
+{
+  "title": "Compliance DVN — Indexer",
+  "uid": "compliance-dvn-indexer",
+  "tags": [
+    "compliance-dvn",
+    "indexer"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "editable": true,
+  "description": "Ingest health, graph output, and the audit trail of risk verdicts. Prometheus panels come from the indexer's /metrics; the verdict and graph panels query its Postgres directly, since that data is the long-term record and is not exported as metrics.",
+  "templating": {
+    "list": [
+      {
+        "name": "prom",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "DVN Prometheus",
+          "value": "dvn-prometheus"
+        },
+        "hide": 0
+      },
+      {
+        "name": "pg",
+        "label": "Postgres (indexer)",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "current": {
+          "text": "DVN Postgres",
+          "value": "dvn-postgres"
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Ingest health",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "title": "Up",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(indexer_up)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Scan lag (head - cursor)",
+      "type": "timeseries",
+      "description": "How far behind the safe head each chain is. A steadily growing line means ingest cannot keep up; a flat line at roughly CONFIRMATIONS is healthy.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 11,
+        "x": 3,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "indexer_chain_head_block - indexer_cursor_block",
+          "legendFormat": "{{chain}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Reorgs",
+      "type": "timeseries",
+      "description": "Reorgs detected and blocks rolled back. A spike here calls every derived label from that window into question, because the rows behind them were rescanned.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum by (chain) (increase(indexer_reorgs_total[1h]))",
+          "legendFormat": "reorgs {{chain}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (chain) (increase(indexer_reorg_blocks_unwound_total[1h]))",
+          "legendFormat": "blocks unwound {{chain}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Scan errors",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 5
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(indexer_scan_errors_total[1h]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Ingest rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "expr": "sum by (chain) (rate(indexer_edges_ingested_total[5m]))",
+          "legendFormat": "edges {{chain}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (chain) (rate(indexer_verdicts_ingested_total[5m]))",
+          "legendFormat": "verdicts {{chain}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (chain) (rate(indexer_approvals_ingested_total[5m]))",
+          "legendFormat": "approvals {{chain}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Seed labels held",
+      "type": "timeseries",
+      "description": "Authoritative sanctions/mixer seeds the graph grows from. A drop to zero means proximity is being computed against nothing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "expr": "max(indexer_seed_labels)",
+          "legendFormat": "seeds",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(indexer_seed_refresh_total{result=\"failure\"}[1h]))",
+          "legendFormat": "refresh failures (1h)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Published feed",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "Feed version",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 18
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "expr": "max(indexer_feed_version)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Feed entries",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 18
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "max(indexer_feed_entries)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Feed age",
+      "type": "stat",
+      "description": "Seconds since the newest feed was generated. The worker stops scoring feed labels once a document expires, so this climbing past FEED_TTL_SEC means degraded screening.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 18
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3600
+              },
+              {
+                "color": "red",
+                "value": 7200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "time() - max(indexer_feed_generated_at)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Feed builds",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (increase(indexer_feed_build_total[1h]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Feed history",
+      "type": "table",
+      "description": "Every document published. `version` must strictly increase — the worker rejects a repeat.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(generated_at) AS generated, version, entry_count, policy_version, to_timestamp(expires_at) AS expires FROM feeds ORDER BY version DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Risk verdicts (audit trail)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "collapsed": false
+    },
+    {
+      "id": 12,
+      "title": "Verdicts by action",
+      "type": "timeseries",
+      "description": "Decoded from the RiskVerdict event's action code: 0 allow, 1 delay, 2 manual-review, 3 block. Time comes from the block the event was in — events carry a block number, not a timestamp, so this joins through `blocks`. Note that delay and manual-review only appear if the worker's EMIT_VERDICT_EVENTS includes them.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH verdicts AS (SELECT to_timestamp(b.block_time) AS ts, v.action FROM risk_verdicts v JOIN blocks b ON b.chain = v.chain AND b.number = v.block_number) SELECT $__timeGroupAlias(ts, '1h'), count(*) AS value, CASE action WHEN 0 THEN 'allow' WHEN 1 THEN 'delay' WHEN 2 THEN 'manual-review' WHEN 3 THEN 'block' ELSE 'unknown' END AS metric FROM verdicts WHERE $__timeFilter(ts) GROUP BY 1, 3 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Verdict totals by action",
+      "type": "piechart",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 31
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE action WHEN 0 THEN 'allow' WHEN 1 THEN 'delay' WHEN 2 THEN 'manual-review' WHEN 3 THEN 'block' ELSE 'unknown' END AS action, count(*) AS verdicts FROM risk_verdicts GROUP BY 1 ORDER BY 2 DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Owner approvals",
+      "type": "stat",
+      "description": "Held packets released by an owner approvePacket call. Each one is a human overriding a hold.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 31
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS approvals FROM packet_approvals",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Recent verdicts",
+      "type": "table",
+      "description": "reason_mask is a bitmask; bit assignments live in worker/assess/verdict.ts REASON_BITS and are append-only. evidence_hash commits to the off-chain evidence document.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(b.block_time) AS time, v.chain, v.block_number, v.payload_hash, CASE v.action WHEN 0 THEN 'allow' WHEN 1 THEN 'delay' WHEN 2 THEN 'manual-review' WHEN 3 THEN 'block' ELSE 'unknown' END AS action, v.score, v.reason_mask, v.evidence_hash, v.tx_hash FROM risk_verdicts v JOIN blocks b ON b.chain = v.chain AND b.number = v.block_number ORDER BY v.block_number DESC LIMIT 100",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Recent approvals",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(b.block_time) AS time, a.chain, a.block_number, a.payload_hash, a.approver, a.tx_hash FROM packet_approvals a JOIN blocks b ON b.chain = a.chain AND b.number = a.block_number ORDER BY a.block_number DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Verdicts without a matching approval",
+      "type": "table",
+      "description": "Packets recorded as held (delay or manual-review) with no approval seen. These are the ones still waiting on a human.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(b.block_time) AS held_since, v.chain, v.block_number, v.payload_hash, v.score, v.reason_mask FROM risk_verdicts v JOIN blocks b ON b.chain = v.chain AND b.number = v.block_number LEFT JOIN packet_approvals a ON a.payload_hash = v.payload_hash WHERE v.action IN (1, 2) AND a.payload_hash IS NULL ORDER BY v.block_number DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Graph & verification",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "collapsed": false
+    },
+    {
+      "id": 18,
+      "title": "Feed watchlist (latest published feed)",
+      "type": "table",
+      "description": "Entries of the newest signed feed — the labels the worker actually ingests.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 58
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e->>'address' AS address,\n  array_to_string(ARRAY(SELECT json_array_elements_text(e->'labels')), ', ') AS labels\nFROM (SELECT json_array_elements((document::json)->'entries') AS e\n        FROM feeds ORDER BY version DESC LIMIT 1) t\nORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Most exposed subjects",
+      "type": "table",
+      "description": "Distinct seeds each subject touched. Outbound counts at any value; inbound only above the configured token minimum.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 58
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT subject, count(DISTINCT seed) AS seeds FROM (SELECT e.from_addr AS subject, e.to_addr AS seed FROM edges e JOIN seed_labels s ON s.subject = e.to_addr UNION SELECT e.to_addr AS subject, e.from_addr AS seed FROM edges e JOIN seed_labels s ON s.subject = e.from_addr JOIN token_minimums m ON m.chain = e.chain AND m.token = e.token WHERE e.value >= m.min_value) t GROUP BY subject ORDER BY seeds DESC LIMIT 25",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Source verification",
+      "type": "table",
+      "description": "verified NULL means we never got an answer from the verifier, which is NOT the same as unverified — only `false` produces an unverified_contract label.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 58
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT chain, CASE WHEN is_contract = false THEN 'eoa' WHEN verified IS NULL THEN 'unknown (retrying)' WHEN verified THEN 'verified' ELSE 'unverified' END AS status, count(*) AS addresses FROM contract_status GROUP BY 1, 2 ORDER BY 1, 3 DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Inbound thresholds configured",
+      "type": "table",
+      "description": "A tracked token missing from this table never produces sanctions_1hop_inbound — its inbound edges are recorded but never labelled.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${pg}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT m.chain, m.token, m.min_value, count(e.tx_hash) AS edges_seen FROM token_minimums m LEFT JOIN edges e ON e.chain = m.chain AND e.token = m.token GROUP BY 1, 2, 3 ORDER BY 1, 2",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Unverified contracts found",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "targets": [
+        {
+          "expr": "indexer_verification_unverified",
+          "legendFormat": "unverified {{chain}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (chain) (rate(indexer_verification_checked_total[15m]))",
+          "legendFormat": "checked/s {{chain}}",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

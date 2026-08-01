@@ -93,8 +93,10 @@ contract ComplianceDvnVetoTest is TestHelperOz5 {
         address recvUlnB = endpointSetup.receiveLibs[1]; // eid 2
 
         // Deploy the ComplianceDVN for endpoint B. operator = this test, fee = 0
-        // (the harness does not forward msg.value to assignJob).
-        dvnB = new ComplianceDVN(address(this), address(this), recvUlnB, 0);
+        // (the harness does not forward msg.value to assignJob). assignJob is gated to the
+        // send library, so pass B's real send lib even though this receive-side DVN never
+        // expects the call.
+        dvnB = new ComplianceDVN(address(this), address(this), endpointSetup.sendLibs[1], recvUlnB, 0);
 
         // Install ComplianceDVN as the REQUIRED receive-side DVN for the A->B
         // pathway (delivery gating happens on the receive side, eid B, srcEid A).
@@ -201,8 +203,9 @@ contract ComplianceDvnVetoTest is TestHelperOz5 {
         bytes memory header = this._headerOf(packet);
         bytes32 payloadHash = this._payloadHashOf(packet);
 
-        // Operator (this test) routes verification THROUGH our ComplianceDVN.
-        dvnB.submitVerification(header, payloadHash, CONFIRMATIONS);
+        // Operator (this test) routes verification THROUGH our ComplianceDVN, carrying the
+        // allow verdict that permitted it (score 0, no reasons).
+        dvnB.submitVerification(header, payloadHash, CONFIRMATIONS, dvnB.ACTION_ALLOW(), 0, 0, bytes32(0));
 
         // Now the required DVN has verified -> commit succeeds.
         IReceiveUlnConfigurable(address(dvnB.receiveUln())).commitVerification(header, payloadHash);

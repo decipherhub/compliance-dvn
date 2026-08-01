@@ -20,7 +20,6 @@
     "test:forge": "forge test",
     "test:hardhat": "hardhat test",
     "worker": "tsx worker/service.ts",
-    "cli": "tsx worker/cli.ts",
     "test:worker": "vitest run worker/test",
     "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
     "docker:worker": "docker build -t compliance-dvn-worker worker/"
@@ -96,7 +95,6 @@
     "commander": "^15.0.0",
     "node-fetch": "^2.7.0",
     "pino": "^10.3.1",
-    "prom-client": "^15.1.3",
-    "zod": "^4.4.3"
+    "prom-client": "^15.1.3"
   }
 }
