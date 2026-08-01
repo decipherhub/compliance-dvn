@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest'
 import { ethers } from 'ethers'
+import { beforeEach, describe, expect, it } from 'vitest'
+
+import { type FeedDocument, buildAndPublish, latestFeed, nextVersion, signFeed } from '../src/feed/builder'
 import { canonicalize } from '../src/feed/canonical'
-import { buildAndPublish, latestFeed, nextVersion, signFeed, type FeedDocument } from '../src/feed/builder'
+
 import { applySchema, memDb, seedFixture } from './helpers/memdb'
 
 const KEY = '0x' + '7'.repeat(64)

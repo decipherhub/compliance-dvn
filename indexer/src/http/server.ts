@@ -1,9 +1,12 @@
-import { createServer, type Server } from 'http'
-import type { Logger } from 'pino'
-import type { Db } from '../db'
-import type { Metrics } from '../metrics'
-import type { SignedFeed } from '../feed/builder'
+import { type Server, createServer } from 'http'
+
 import { computeProximity } from '../graph/proximity'
+
+import type { Db } from '../db'
+import type { SignedFeed } from '../feed/builder'
+import type { Metrics } from '../metrics'
+import type { Logger } from 'pino'
+
 
 export interface HttpDeps {
   port: number

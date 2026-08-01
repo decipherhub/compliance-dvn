@@ -1,6 +1,7 @@
-import type { Logger } from 'pino'
+import { type SourcifyOptions, lookupMany } from './sourcify'
+
 import type { Db } from '../db'
-import { lookupMany, type SourcifyOptions } from './sourcify'
+import type { Logger } from 'pino'
 
 /** Just enough of a provider to tell a contract from an EOA. */
 export interface CodeReader {

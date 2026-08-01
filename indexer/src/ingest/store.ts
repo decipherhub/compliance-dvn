@@ -1,5 +1,5 @@
-import type { Db } from '../db'
 import type { BridgeSendRow, PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
+import type { Db } from '../db'
 
 /**
  * All writes for one chain's scanned range, plus the reorg bookkeeping around them.

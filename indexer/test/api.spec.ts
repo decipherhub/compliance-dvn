@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import pino from 'pino'
-import { startHttpServer, type HttpServer } from '../src/http/server'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { type HttpServer, startHttpServer } from '../src/http/server'
 import { createMetrics } from '../src/metrics'
+
 import { applySchema, memDb, seedFixture } from './helpers/memdb'
 
 const silent = pino({ level: 'silent' })

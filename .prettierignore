@@ -20,3 +20,8 @@ deployments/
 # Standalone Node 20 packages: formatted via their own toolchains, not the root.
 worker/
 indexer/
+
+# Demo dashboard: hand-formatted static pages (2-space, embedded scripts); reformatting
+# them to the root style is churn with no reader. Prebuilt artifacts are generated JSON.
+demo/dashboard/
+demo/prebuilt/

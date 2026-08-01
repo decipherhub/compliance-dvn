@@ -1,6 +1,8 @@
-import { newDb } from 'pg-mem'
-import { readdirSync, readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
+
+import { newDb } from 'pg-mem'
+
 import type { Db, QueryResult } from '../../src/db'
 
 const MIGRATIONS_DIR = join(__dirname, '..', '..', 'db', 'migrations')

@@ -1,16 +1,18 @@
 import 'dotenv/config'
 import { ethers } from 'ethers'
-import { loadConfig, type Config } from './config'
-import { createLogger } from './logger'
-import { createMetrics } from './metrics'
-import { createPgDb } from './pg'
-import { migrate } from './migrate'
-import { IngestStore } from './ingest/store'
+
+import { type Config, loadConfig } from './config'
+import { buildAndPublish, latestFeed } from './feed/builder'
+import { startHttpServer } from './http/server'
 import { scanChainOnce } from './ingest/scanner'
 import { refreshSeeds } from './ingest/seeds'
-import { buildAndPublish, latestFeed } from './feed/builder'
+import { IngestStore } from './ingest/store'
+import { createLogger } from './logger'
+import { createMetrics } from './metrics'
+import { migrate } from './migrate'
+import { createPgDb } from './pg'
 import { refreshVerification } from './verify/refresh'
-import { startHttpServer } from './http/server'
+
 import type { LogSource } from './chain/events'
 
 /** Sleep that resolves early when the abort signal fires, for prompt shutdown. */

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+
 import { DEFAULT_SOURCIFY_URL } from './verify/sourcify'
 
 /**

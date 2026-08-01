@@ -1,4 +1,5 @@
 import { Pool, type PoolClient } from 'pg'
+
 import type { Db, QueryResult } from './db'
 
 /** Wrap a pg Pool (or a checked-out client) in the `Db` interface. */

@@ -1,4 +1,5 @@
 import pino, { type Logger } from 'pino'
+
 import type { Config } from './config'
 
 /** JSON logs in production; pretty only when explicitly developing. */

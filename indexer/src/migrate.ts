@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
+
 import type { Db } from './db'
 
 const MIGRATIONS_DIR = join(__dirname, '..', 'db', 'migrations')

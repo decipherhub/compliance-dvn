@@ -191,7 +191,11 @@ describe('ComplianceDVN', () => {
             const paid = await DVN.deploy(owner.address, operator.address, sendLib.address, receiveUln.address, fee)
             const quoted: BigNumber = await paid.connect(sendLib).callStatic.assignJob(param, '0x', { value: 0 })
             expect(quoted.toString()).to.equal(fee.toString())
-            const args = await eventArgs(paid.connect(sendLib).assignJob(param, '0x', { value: 0 }), paid, 'JobAssigned')
+            const args = await eventArgs(
+                paid.connect(sendLib).assignJob(param, '0x', { value: 0 }),
+                paid,
+                'JobAssigned'
+            )
             expect(args.payloadHash).to.equal(PAYLOAD)
         })
 

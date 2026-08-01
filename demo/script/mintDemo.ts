@@ -1,4 +1,4 @@
-import { ethers, deployments } from 'hardhat'
+import { deployments, ethers } from 'hardhat'
 
 /**
  * Mint demo balances: 100 tokens to each demo wallet on the target network.

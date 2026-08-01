@@ -339,9 +339,9 @@ Grafana <http://localhost:3000/d/compliance-dvn-indexer> — datasource와 대�
 `contracts/mocks/FakeStablecoinMock.sol` — USDC 심볼을 주장하는 미끼 컨트랙트입니다. 가치가 없고
 스테이블코인도 아니며, 리스크 엔진의 사칭 탐지를 실제로 굴려보기 위한 것입니다.
 
-| 체인 | 주소 |
-| ---- | ---- |
-| base-sepolia | `0x1B48E40F971298b03B6AD0Ae3CA047CD11b7eA6e` |
+| 체인             | 주소                                         |
+| ---------------- | -------------------------------------------- |
+| base-sepolia     | `0x1B48E40F971298b03B6AD0Ae3CA047CD11b7eA6e` |
 | optimism-sepolia | `0x7Ec44363Fdaa7EEC9B49a858220Ff543Bcd43ac7` |
 
 한 컨트랙트로 두 신호를 보여줍니다 (실측 확인):
@@ -353,11 +353,11 @@ Grafana <http://localhost:3000/d/compliance-dvn-indexer> — datasource와 대�
 
 ### 데모용 컨트랙트 두 개 (테스트넷 전용)
 
-| 컨트랙트 | 체인 | 주소 | 발화 신호 |
-| -------- | ---- | ---- | --------- |
-| `FakeStablecoinMock` | base-sepolia | `0x1B48E40F971298b03B6AD0Ae3CA047CD11b7eA6e` | `fake_stablecoin_suspect` 65 → manual-review |
-| `FakeStablecoinMock` | optimism-sepolia | `0x7Ec44363Fdaa7EEC9B49a858220Ff543Bcd43ac7` | (SCAM_TOKENS에 넣으면 `scam_token` 100 → block) |
-| `RiskyProxyMock` | optimism-sepolia | `0x9771013D82dcC2bdb489B982B4f201FD698A15e6` | `upgradeable_proxy` 15 + `contract_admin_risk` 50 = 65 → manual-review |
+| 컨트랙트             | 체인             | 주소                                         | 발화 신호                                                              |
+| -------------------- | ---------------- | -------------------------------------------- | ---------------------------------------------------------------------- |
+| `FakeStablecoinMock` | base-sepolia     | `0x1B48E40F971298b03B6AD0Ae3CA047CD11b7eA6e` | `fake_stablecoin_suspect` 65 → manual-review                           |
+| `FakeStablecoinMock` | optimism-sepolia | `0x7Ec44363Fdaa7EEC9B49a858220Ff543Bcd43ac7` | (SCAM_TOKENS에 넣으면 `scam_token` 100 → block)                        |
+| `RiskyProxyMock`     | optimism-sepolia | `0x9771013D82dcC2bdb489B982B4f201FD698A15e6` | `upgradeable_proxy` 15 + `contract_admin_risk` 50 = 65 → manual-review |
 
 `RiskyProxyMock`은 EIP-1967 슬롯에 admin을 `0x…dEaD`(TEST_DENYLIST 주소)로 써 둡니다. 실권자가
 오염된 업그레이더블 컨트랙트를 흉내내는 것이고, 다른 admin으로 배포하려면 `RISKY_ADMIN`을 주면
@@ -372,12 +372,12 @@ delegate(= owner)만 호출할 수 있습니다. 대시보드 "보류 패킷" �
 
 ### 데모 지연시간 설정
 
-| 설정 | 파일 | 값 |
-| ---- | ---- | -- |
-| `POLL_MS` | worker | 3000 |
-| `SCAN_CONFIRMATIONS` | worker | 1 (온체인 증명값 `DVN_CONFIRMATIONS`=5는 ULN 요구조건이라 유지) |
-| `FEED_REFRESH_MS` | worker | 5000 — 피드만 재수신 (전체 재빌드는 60초) |
-| `POLL_MS` / `CONFIRMATIONS` | indexer | 5000 / 1 |
-| `FEED_REBUILD_MS` | indexer | 60000 — 단, **새 엣지가 잡히면 즉시 재발행** |
+| 설정                        | 파일    | 값                                                              |
+| --------------------------- | ------- | --------------------------------------------------------------- |
+| `POLL_MS`                   | worker  | 3000                                                            |
+| `SCAN_CONFIRMATIONS`        | worker  | 1 (온체인 증명값 `DVN_CONFIRMATIONS`=5는 ULN 요구조건이라 유지) |
+| `FEED_REFRESH_MS`           | worker  | 5000 — 피드만 재수신 (전체 재빌드는 60초)                       |
+| `POLL_MS` / `CONFIRMATIONS` | indexer | 5000 / 1                                                        |
+| `FEED_REBUILD_MS`           | indexer | 60000 — 단, **새 엣지가 잡히면 즉시 재발행**                    |
 
 전송 → 판정 ≈ 3.5초, 그래프 라벨 반영 ≈ 10초.

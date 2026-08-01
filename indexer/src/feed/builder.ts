@@ -1,8 +1,11 @@
 import { ethers } from 'ethers'
-import type { Db } from '../db'
-import { canonicalize } from './canonical'
+
 import { computeProximity } from '../graph/proximity'
 import { unverifiedContracts } from '../verify/refresh'
+
+import { canonicalize } from './canonical'
+
+import type { Db } from '../db'
 
 /**
  * Builds and signs the document the DVN worker consumes.

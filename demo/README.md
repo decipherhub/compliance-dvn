@@ -5,13 +5,13 @@
 
 ## 구성
 
-| 경로 | 내용 |
-|---|---|
-| `dashboard/` | 데모 대시보드 — MetaMask 크로스체인 전송, owner 승인/거절, 제재 목록·판정 로그, 홉 그래프 |
-| `contracts/` | 데모 전용 컨트랙트 소스 (`FakeStablecoinMock`, `RiskyProxyMock`) |
-| `prebuilt/` | 위 소스의 컴파일 아티팩트 — 메인 파이프라인이 컴파일하지 않으므로 배포 스크립트가 이걸 사용 |
-| `deploy/` | 데모 컨트랙트 hardhat-deploy 스크립트 (`FakeUsdcOFT`, `RiskyProxyMock`, `FakeStablecoinMock`) |
-| `script/` | `mintDemo.ts` — 데모 지갑 5개에 토큰 100개씩 발행 (idempotent) |
+| 경로         | 내용                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------- |
+| `dashboard/` | 데모 대시보드 — MetaMask 크로스체인 전송, owner 승인/거절, 제재 목록·판정 로그, 홉 그래프     |
+| `contracts/` | 데모 전용 컨트랙트 소스 (`FakeStablecoinMock`, `RiskyProxyMock`)                              |
+| `prebuilt/`  | 위 소스의 컴파일 아티팩트 — 메인 파이프라인이 컴파일하지 않으므로 배포 스크립트가 이걸 사용   |
+| `deploy/`    | 데모 컨트랙트 hardhat-deploy 스크립트 (`FakeUsdcOFT`, `RiskyProxyMock`, `FakeStablecoinMock`) |
+| `script/`    | `mintDemo.ts` — 데모 지갑 5개에 토큰 100개씩 발행 (idempotent)                                |
 
 ## 대시보드 실행
 

@@ -1,16 +1,18 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import pino from 'pino'
 import { ethers } from 'ethers'
-import { scanChainOnce } from '../src/ingest/scanner'
-import { IngestStore } from '../src/ingest/store'
+import pino from 'pino'
+import { beforeEach, describe, expect, it } from 'vitest'
+
 import {
+  type LogSource,
+  decodePacketRecipient,
   dvnInterface,
   endpointInterface,
   erc20Interface,
   oftInterface,
-  decodePacketRecipient,
-  type LogSource,
 } from '../src/chain/events'
+import { scanChainOnce } from '../src/ingest/scanner'
+import { IngestStore } from '../src/ingest/store'
+
 import { applySchema, memDb } from './helpers/memdb'
 
 const silent = pino({ level: 'silent' })

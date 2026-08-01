@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { loadConfig, CHAIN_REGISTRY } from '../src/config'
-import { parseOfacList, parseOpenSanctionsNdjson, refreshSeeds, MIXER_ADDRESSES } from '../src/ingest/seeds'
+import { describe, expect, it } from 'vitest'
+
+import { CHAIN_REGISTRY, loadConfig } from '../src/config'
+import { MIXER_ADDRESSES, parseOfacList, parseOpenSanctionsNdjson, refreshSeeds } from '../src/ingest/seeds'
 import { IngestStore } from '../src/ingest/store'
+
 import { applySchema, memDb } from './helpers/memdb'
 
 const KEY = '0x' + '7'.repeat(64)

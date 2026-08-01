@@ -1,4 +1,4 @@
-import { Registry, Counter, Gauge, collectDefaultMetrics } from 'prom-client'
+import { Counter, Gauge, Registry, collectDefaultMetrics } from 'prom-client'
 
 /** Typed metric surface. Each instance owns a private Registry so tests stay isolated. */
 export interface Metrics {

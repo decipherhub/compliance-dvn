@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { computeProximity, outboundLabels, inboundLabels, exposureCounts, GRAPH_DEPTH } from '../src/graph/proximity'
+import { beforeEach, describe, expect, it } from 'vitest'
+
+import { GRAPH_DEPTH, computeProximity, exposureCounts, inboundLabels, outboundLabels } from '../src/graph/proximity'
 import { IngestStore } from '../src/ingest/store'
+
 import { applySchema, memDb, seedFixture } from './helpers/memdb'
-import type { Db } from '../src/db'
+
 
 const SANCTIONED = '0x' + 'a'.repeat(40)
 const MIXER = '0x' + 'b'.repeat(40)

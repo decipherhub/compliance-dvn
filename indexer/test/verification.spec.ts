@@ -1,15 +1,17 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
 import pino from 'pino'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { collectEntries } from '../src/feed/builder'
+import { refreshVerification, unverifiedContracts } from '../src/verify/refresh'
 import {
-  parseMatch,
-  lookupOne,
-  lookupMany,
-  RateLimited,
   DEFAULT_SOURCIFY_URL,
   type Fetcher,
+  RateLimited,
+  lookupMany,
+  lookupOne,
+  parseMatch,
 } from '../src/verify/sourcify'
-import { refreshVerification, unverifiedContracts } from '../src/verify/refresh'
-import { collectEntries } from '../src/feed/builder'
+
 import { applySchema, memDb, seedFixture } from './helpers/memdb'
 
 const silent = pino({ level: 'silent' })

@@ -1,7 +1,8 @@
-import type { Logger } from 'pino'
-import type { BridgeSendRow, LogSource, PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
 import { scanBridgeSends, scanDvnEvents, scanTransfers } from '../chain/events'
+
 import type { IngestStore } from './store'
+import type { BridgeSendRow, LogSource, PacketApprovalRow, RiskVerdictRow, TransferRow } from '../chain/events'
+import type { Logger } from 'pino'
 
 export interface ScanChainDeps {
   chain: { key: string; dvn: string; endpoint: string }
